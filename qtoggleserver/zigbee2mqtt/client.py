@@ -418,7 +418,6 @@ class Zigbee2MQTTClient(Peripheral):
                 {
                     'driver': DeviceControlPort,
                     'id': '',
-                    'display_name': device_info['definition'].get('description'),
                     'type': core_ports.TYPE_BOOLEAN,
                     'writable': True,
                     'device_friendly_name': friendly_name,

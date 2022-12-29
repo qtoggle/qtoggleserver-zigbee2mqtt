@@ -38,7 +38,7 @@ class DevicePort(Zigbee2MQTTPort):
         self,
         *,
         id: str,
-        display_name: str,
+        display_name: str = '',
         type: str,
         writable: bool,
         unit: Optional[str] = None,
@@ -122,6 +122,9 @@ class DeviceControlPort(DevicePort):
         }
     }
 
+    STANDARD_ATTRDEFS = dict(DevicePort.STANDARD_ATTRDEFS)
+    STANDARD_ATTRDEFS['display_name']['persisted'] = False
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -174,6 +177,14 @@ class DeviceControlPort(DevicePort):
 
     async def write_value(self, value: PortValue) -> None:
         await self.get_peripheral().set_device_enabled(self.get_device_friendly_name(), value)
+
+    async def attr_get_display_name(self) -> str:
+        config = self.get_peripheral().get_device_config(self.get_device_friendly_name()) or {}
+        info = self.get_peripheral().get_device_info(self.get_device_friendly_name()) or {}
+        return config.get('description', info.get('definition', {}).get('description', ''))
+
+    async def attr_set_display_name(self, value: str) -> None:
+        await self.get_peripheral().set_device_config(self.get_device_friendly_name(), {'description': value})
 
     # This disables the persisted attribute
     async def attr_is_persisted(self) -> None:
