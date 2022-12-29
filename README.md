@@ -25,8 +25,8 @@ Otherwise, install it using pip:
 
 ## Peripheral Driver & Parameters
 
-Add a peripheral with `driver` to `qtoggleserver.zigbee2mqtt.Zigbee2MQTTClient` and the following parameters:
- 
+### `driver`: `qtoggleserver.zigbee2mqtt.Zigbee2MQTTClient`
+
 ### `mqtt_server`
 
  * type: `string`
