@@ -125,9 +125,6 @@ class DeviceControlPort(DevicePort):
     STANDARD_ATTRDEFS = dict(DevicePort.STANDARD_ATTRDEFS)
     STANDARD_ATTRDEFS['display_name']['persisted'] = False
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
     _MAX_RENAME_ATTEMPTS = 10
 
     async def enable_renamed_ports(self, enabled_port_ids: set[str], new_friendly_name: str, attempt: int = 1) -> None:

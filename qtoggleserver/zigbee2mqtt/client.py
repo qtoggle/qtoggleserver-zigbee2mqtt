@@ -356,7 +356,7 @@ class Zigbee2MQTTClient(Peripheral):
     def is_device_online(self, friendly_name: str) -> Optional[bool]:
         return self._device_online_by_friendly_name.get(friendly_name)
 
-    async def set_device_enabled(self, friendly_name: str, enabled: bool):
+    async def set_device_enabled(self, friendly_name: str, enabled: bool) -> None:
         await self.set_device_config(friendly_name, {'qtoggleserver': {'enabled': enabled}})
 
     def is_device_enabled(self, friendly_name: str) -> bool:
