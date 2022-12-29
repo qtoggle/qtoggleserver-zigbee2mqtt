@@ -76,3 +76,10 @@ bridge.
 
  * type: `integer`
  * default: `10`
+
+### `permit_join_timeout`
+
+Indicates the timeout, in seconds, to permit new Zigbee devices to join, once enabled.
+
+ * type: `integer`
+ * default: `3600`

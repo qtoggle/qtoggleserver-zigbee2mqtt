@@ -21,6 +21,7 @@ class Zigbee2MQTTClient(Peripheral):
     DEFAULT_MQTT_BASE_TOPIC = 'zigbee2mqtt'
     DEFAULT_MQTT_RECONNECT_INTERVAL = 5  # seconds
     DEFAULT_BRIDGE_REQUEST_TIMEOUT = 10  # seconds
+    DEFAULT_PERMIT_JOIN_TIMEOUT = 3600  # seconds
 
     # Used to adjust names of ports and attributes
     _NAME_MAPPING = {
@@ -47,6 +48,7 @@ class Zigbee2MQTTClient(Peripheral):
         mqtt_logging: bool = False,
         bridge_logging: bool = False,
         bridge_request_timeout: int = DEFAULT_BRIDGE_REQUEST_TIMEOUT,
+        permit_join_timeout: int = DEFAULT_PERMIT_JOIN_TIMEOUT,
         **kwargs,
     ) -> None:
         self.mqtt_server: str = mqtt_server
@@ -59,6 +61,7 @@ class Zigbee2MQTTClient(Peripheral):
         self.mqtt_logging: bool = mqtt_logging
         self.bridge_logging: bool = bridge_logging
         self.bridge_request_timeout: int = bridge_request_timeout
+        self.permit_join_timeout: int = permit_join_timeout
 
         self._mqtt_client: Optional[aiomqtt.Client] = None
         self._mqtt_base_topic_len: int = len(mqtt_base_topic)
@@ -346,6 +349,15 @@ class Zigbee2MQTTClient(Peripheral):
 
     def get_bridge_info(self) -> Optional[GenericJSONDict]:
         return self._bridge_info
+
+    async def set_permit_join(self, value: bool) -> None:
+        await self.do_request('permit_join', {'value': value, 'time': self.permit_join_timeout})
+
+    def is_permit_join(self) -> Optional[bool]:
+        if not self._bridge_info:
+            return
+
+        return self._bridge_info.get('permit_join', False)
 
     def get_device_info(self, friendly_name: str) -> Optional[GenericJSONDict]:
         return self._device_info_by_friendly_name.get(friendly_name)

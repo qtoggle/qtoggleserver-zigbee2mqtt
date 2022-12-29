@@ -21,16 +21,13 @@ class PermitJoinPort(Zigbee2MQTTPort):
     TYPE = core_ports.TYPE_BOOLEAN
     WRITABLE = True
     DISPLAY_NAME = 'Permit Join'
+    PERSISTED = None
 
     async def read_value(self) -> NullablePortValue:
-        bridge_info = self.get_peripheral().get_bridge_info()
-        if not bridge_info:
-            return None
-
-        return bridge_info.get('permit_join', False)
+        return self.get_peripheral().is_permit_join()
 
     async def write_value(self, value: PortValue) -> None:
-        await self.get_peripheral().do_request('permit_join', {'value': value})
+        await self.get_peripheral().set_permit_join(value)
 
 
 class DevicePort(Zigbee2MQTTPort):
@@ -125,6 +122,8 @@ class DeviceControlPort(DevicePort):
     STANDARD_ATTRDEFS = dict(DevicePort.STANDARD_ATTRDEFS)
     STANDARD_ATTRDEFS['display_name']['persisted'] = False
 
+    PERSISTED = None
+
     _MAX_RENAME_ATTEMPTS = 10
 
     async def enable_renamed_ports(self, enabled_port_ids: set[str], new_friendly_name: str, attempt: int = 1) -> None:
@@ -188,7 +187,3 @@ class DeviceControlPort(DevicePort):
 
     async def attr_set_display_name(self, value: str) -> None:
         await self.get_peripheral().set_device_config(self.get_device_friendly_name(), {'description': value})
-
-    # This disables the persisted attribute
-    async def attr_is_persisted(self) -> None:
-        return None
