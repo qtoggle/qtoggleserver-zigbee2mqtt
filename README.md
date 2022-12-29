@@ -1,24 +1,31 @@
+ * [About](#about)
+ * [Install](#install)
+ * [Peripheral Driver & Parameters](#peripheral-driver--parameters)
+
+---
+
+
 ## About
 
 This is an addon for [qToggleServer](https://github.com/qtoggle/qtoggleserver).
 
-It provides ports for Zigbee devices controlled by [Zigbee2MQTT](https://www.zigbee2mqtt.io/).
+It provides a [peripheral driver](https://github.com/qtoggle/qtoggleserver/wiki/Peripheral-Drivers) that exposes ports
+for Zigbee devices controlled by [Zigbee2MQTT](https://www.zigbee2mqtt.io/).
 
 
 ## Install
 
-Install using pip:
+If you run [qToggleOS](https://github.com/qtoggle/qtoggleos), this addon is already installed. You'll need, however, to
+enable [Zigbee](https://github.com/qtoggle/qtoggleos/wiki/Zigbee) support.
+
+Otherwise, install it using pip:
 
     pip install qtoggleserver-zigbee2mqtt
 
 
-## Driver
+## Peripheral Driver & Parameters
 
-Set `driver` to:
-    
-    qtoggleserver.zigbee2mqtt.Zigbee2MQTTClient
-
-## Parameters
+Add a peripheral with `driver` to `qtoggleserver.zigbee2mqtt.Zigbee2MQTTClient` and the following parameters:
  
 ### `mqtt_server`
 
