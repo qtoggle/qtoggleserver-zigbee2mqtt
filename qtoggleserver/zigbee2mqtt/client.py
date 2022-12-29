@@ -27,6 +27,13 @@ class Zigbee2MQTTClient(Peripheral):
         'linkquality': 'link_quality',
     }
 
+    _TYPE_MAPPING = {
+        'binary': core_ports.TYPE_BOOLEAN,
+        'numeric': core_ports.TYPE_NUMBER,
+        core_ports.TYPE_BOOLEAN: 'binary',
+        core_ports.TYPE_NUMBER: 'numeric',
+    }
+
     def __init__(
         self,
         *,
@@ -51,9 +58,6 @@ class Zigbee2MQTTClient(Peripheral):
         self.bridge_logging: bool = bridge_logging
         self.request_timeout: int = request_timeout
 
-        self.mqtt_logger: logging.Logger = self.logger.getChild('mqtt')
-        self.bridge_logger: logging.Logger = self.logger.getChild('bridge')
-
         self._mqtt_client: Optional[aiomqtt.Client] = None
         self._mqtt_base_topic_len: int = len(mqtt_base_topic)
         self._client_task: Optional[asyncio.Task] = None
@@ -66,6 +70,12 @@ class Zigbee2MQTTClient(Peripheral):
         self._update_ports_from_device_info_lock: asyncio.Lock = asyncio.Lock()
 
         super().__init__(**kwargs)
+
+        self.mqtt_logger: logging.Logger = self.logger.getChild('mqtt')
+        self.bridge_logger: logging.Logger = self.logger.getChild('bridge')
+
+        # TODO: use a common way of adjusting default logging settings from addons
+        self.mqtt_logger.setLevel(logging.INFO)
 
     async def _client_loop(self) -> None:
         while True:
@@ -357,6 +367,17 @@ class Zigbee2MQTTClient(Peripheral):
         self.debug('renaming device "%s" to "%s"', old_friendly_name, new_friendly_name)
         if re.match(r'^device_[a-f0-9]{16}$', old_friendly_name):
             old_friendly_name = f'0x{old_friendly_name[7:]}'
+
+        device_dicts = [
+            self._device_online_by_friendly_name,
+            self._device_config_by_friendly_name,
+            self._device_info_by_friendly_name,
+            self._device_state_by_friendly_name,
+        ]
+        for device_dict in device_dicts:
+            if old_friendly_name in device_dict:
+                device_dict[new_friendly_name] = device_dict[old_friendly_name]
+
         await self.do_request('device/rename', {'from': old_friendly_name, 'to': new_friendly_name})
 
     async def make_port_args(self) -> list[dict[str, Any]]:
@@ -389,15 +410,6 @@ class Zigbee2MQTTClient(Peripheral):
                     self.debug('new port %s detected', new_id)
                     await self.add_port(port_args)
 
-            # Check existing ports for attribute changes
-            for port_id, port in ports_by_id.items():
-                port_args = port_args_list_by_id.get(port_id)
-                if not port_args:
-                    continue
-
-                # if port.get_type()
-                # TODO: check ports whose port args have changed
-
     def _port_args_from_device_info(
         self,
         device_info_by_friendly_name: dict[str, GenericJSONDict],
@@ -428,10 +440,7 @@ class Zigbee2MQTTClient(Peripheral):
             for exposed_info in device_info['definition'].get('exposes', []):
                 name = exposed_info['name']
                 name = self._NAME_MAPPING.get(name, name)
-                type_ = {
-                    'binary': core_ports.TYPE_BOOLEAN,
-                    'numeric': core_ports.TYPE_NUMBER,
-                }.get(exposed_info['type'])
+                type_ = self._TYPE_MAPPING.get(exposed_info['type'])
                 if not type_:
                     continue
                 port_args = {
@@ -463,10 +472,7 @@ class Zigbee2MQTTClient(Peripheral):
                 else:
                     port_args = port_args_list[0]
 
-                type_ = {
-                    'binary': core_ports.TYPE_BOOLEAN,
-                    'numeric': core_ports.TYPE_NUMBER,
-                }.get(option_info['type'])
+                type_ = self._TYPE_MAPPING.get(option_info['type'])
                 if not type_:
                     continue
                 port_args['additional_attrdefs'][name] = {

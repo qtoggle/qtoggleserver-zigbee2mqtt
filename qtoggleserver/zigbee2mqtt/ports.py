@@ -146,18 +146,24 @@ class DeviceControlPort(DevicePort):
         for port in ports:
             if port.get_initial_id() in enabled_port_ids:
                 await port.enable()
+                port.invalidate_attrs()
+                await port.trigger_update()
+                await port.save()
 
     async def attr_set_friendly_name(self, value: str) -> None:
         old_device_friendly_name = self.get_device_friendly_name()
 
         # Remember enabled ports before they are renamed (practically removed and re-added)
-        enabled_port_ids = [p.get_initial_id() for p in self.get_peripheral().get_device_ports() if p.is_enabled()]
-        for i, port_id in enumerate(enabled_port_ids):
+        all_enabled_port_ids = [p.get_initial_id() for p in self.get_peripheral().get_device_ports() if p.is_enabled()]
+        device_enabled_port_ids = []
+        for port_id in all_enabled_port_ids:
             if port_id == old_device_friendly_name:
                 port_id = value
             elif port_id.startswith(f'{old_device_friendly_name}.'):
                 port_id = f'{value}.{port_id[len(old_device_friendly_name) + 1:]}'
-            enabled_port_ids[i] = port_id
+            else:
+                continue
+            device_enabled_port_ids.append(port_id)
 
         # Delay the actual renaming call a bit, so that this attribute setter completes and triggers the `port-update`
         # event for this port *before* it is removed.
@@ -166,7 +172,7 @@ class DeviceControlPort(DevicePort):
         )
 
         asyncio.create_task(
-            asyncio_utils.await_later(2, self.enable_renamed_ports(set(enabled_port_ids), value))
+            asyncio_utils.await_later(2, self.enable_renamed_ports(set(device_enabled_port_ids), value))
         )
 
     async def attr_get_friendly_name(self) -> str:
