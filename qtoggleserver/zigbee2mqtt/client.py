@@ -20,7 +20,7 @@ class Zigbee2MQTTClient(Peripheral):
     DEFAULT_MQTT_CLIENT_ID = 'qtoggleserver'
     DEFAULT_MQTT_BASE_TOPIC = 'zigbee2mqtt'
     DEFAULT_MQTT_RECONNECT_INTERVAL = 5  # seconds
-    DEFAULT_REQUEST_TIMEOUT = 10  # seconds
+    DEFAULT_BRIDGE_REQUEST_TIMEOUT = 10  # seconds
 
     # Used to adjust names of ports and attributes
     _NAME_MAPPING = {
@@ -44,8 +44,9 @@ class Zigbee2MQTTClient(Peripheral):
         mqtt_client_id: str = DEFAULT_MQTT_CLIENT_ID,
         mqtt_base_topic: str = DEFAULT_MQTT_BASE_TOPIC,
         mqtt_reconnect_interval: int = DEFAULT_MQTT_RECONNECT_INTERVAL,
+        mqtt_logging: bool = False,
         bridge_logging: bool = False,
-        request_timeout: int = DEFAULT_REQUEST_TIMEOUT,
+        bridge_request_timeout: int = DEFAULT_BRIDGE_REQUEST_TIMEOUT,
         **kwargs,
     ) -> None:
         self.mqtt_server: str = mqtt_server
@@ -55,8 +56,9 @@ class Zigbee2MQTTClient(Peripheral):
         self.mqtt_client_id: str = mqtt_client_id
         self.mqtt_base_topic: str = mqtt_base_topic
         self.mqtt_reconnect_interval: int = mqtt_reconnect_interval
+        self.mqtt_logging: bool = mqtt_logging
         self.bridge_logging: bool = bridge_logging
-        self.request_timeout: int = request_timeout
+        self.bridge_request_timeout: int = bridge_request_timeout
 
         self._mqtt_client: Optional[aiomqtt.Client] = None
         self._mqtt_base_topic_len: int = len(mqtt_base_topic)
@@ -74,8 +76,8 @@ class Zigbee2MQTTClient(Peripheral):
         self.mqtt_logger: logging.Logger = self.logger.getChild('mqtt')
         self.bridge_logger: logging.Logger = self.logger.getChild('bridge')
 
-        # TODO: use a common way of adjusting default logging settings from addons
-        self.mqtt_logger.setLevel(logging.INFO)
+        if not self.mqtt_logging:
+            self.mqtt_logger.setLevel(logging.CRITICAL)
 
     async def _client_loop(self) -> None:
         while True:
@@ -312,7 +314,7 @@ class Zigbee2MQTTClient(Peripheral):
 
         async with condition:
             try:
-                await asyncio.wait_for(condition.wait(), timeout=self.request_timeout)
+                await asyncio.wait_for(condition.wait(), timeout=self.bridge_request_timeout)
                 subtopic, error, data = self._pending_requests[transaction_id]['response']
                 if error:
                     raise ErrorResponse(error)
