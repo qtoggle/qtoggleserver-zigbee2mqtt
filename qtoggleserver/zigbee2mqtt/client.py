@@ -60,7 +60,7 @@ class Zigbee2MQTTClient(Peripheral):
         self._device_info_by_friendly_name: dict[str, GenericJSONDict] = {}
         self._device_state_by_friendly_name: dict[str, tuple[int, GenericJSONDict]] = {}
         self._device_online_by_friendly_name: dict[str, bool] = {}
-        self._device_enabled_by_friendly_name: dict[str, bool] = {}
+        self._device_config_by_friendly_name: dict[str, GenericJSONDict] = {}
         self._bridge_info: Optional[GenericJSONDict] = None
         self._pending_requests: dict[str, dict[str, Any]] = {}
         self._update_ports_from_device_info_lock: asyncio.Lock = asyncio.Lock()
@@ -186,6 +186,15 @@ class Zigbee2MQTTClient(Peripheral):
 
     async def handle_bridge_info_message(self, payload_json: GenericJSONDict) -> None:
         self._bridge_info = payload_json
+
+        self._device_config_by_friendly_name.clear()
+        devices_config = payload_json.get('config', {}).get('devices')
+        for ieee_address, config in devices_config.items():
+            friendly_name = config.get('friendly_name', ieee_address)
+            config['ieee_address'] = ieee_address
+            self._device_config_by_friendly_name[friendly_name] = config
+
+        await self.update_ports_from_device_info()
 
     async def handle_bridge_logging_message(self, payload_json: GenericJSONDict) -> None:
         if not self.bridge_logging:
@@ -313,6 +322,13 @@ class Zigbee2MQTTClient(Peripheral):
         self.debug('publishing MQTT message on topic "%s": "%s"', topic, payload_str)
         await self._mqtt_client.publish(topic, payload_str)
 
+    async def set_device_config(self, friendly_name: str, config: Any) -> None:
+        self.debug('setting device "%s" config "%s"', friendly_name, json_utils.dumps(config))
+        await self.do_request('device/options', {'id': friendly_name, 'options': config})
+
+    def get_device_config(self, friendly_name: str) -> Optional[GenericJSONDict]:
+        return self._device_config_by_friendly_name.get(friendly_name)
+
     def _make_transaction_id(self) -> str:
         return f'{self.mqtt_client_id}_{int(time.time() * 1000)}'
 
@@ -328,13 +344,14 @@ class Zigbee2MQTTClient(Peripheral):
     def is_device_online(self, friendly_name: str) -> Optional[bool]:
         return self._device_online_by_friendly_name.get(friendly_name)
 
-    def set_device_enabled(self, friendly_name: str, enabled: bool):
-        self.debug('%s device "%s"', ['disabling', 'enabling'][enabled], friendly_name)
-        self._device_enabled_by_friendly_name[friendly_name] = enabled
-        self.update_ports_from_device_info_fire_and_forget()
+    async def set_device_enabled(self, friendly_name: str, enabled: bool):
+        await self.set_device_config(friendly_name, {'qtoggleserver': {'enabled': enabled}})
 
     def is_device_enabled(self, friendly_name: str) -> bool:
-        return self._device_enabled_by_friendly_name.get(friendly_name, True)
+        config = self.get_device_config(friendly_name)
+        if not config:
+            return False
+        return config.get('qtoggleserver', {}).get('enabled', True)
 
     async def rename_device(self, old_friendly_name: str, new_friendly_name: str) -> None:
         self.debug('renaming device "%s" to "%s"', old_friendly_name, new_friendly_name)
@@ -380,9 +397,6 @@ class Zigbee2MQTTClient(Peripheral):
 
                 # if port.get_type()
                 # TODO: check ports whose port args have changed
-
-    def update_ports_from_device_info_fire_and_forget(self) -> None:
-        asyncio.create_task(self.update_ports_from_device_info())
 
     def _port_args_from_device_info(
         self,

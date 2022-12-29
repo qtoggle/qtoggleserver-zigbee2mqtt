@@ -173,4 +173,8 @@ class DeviceControlPort(DevicePort):
         return self.get_peripheral().is_device_enabled(self.get_device_friendly_name())
 
     async def write_value(self, value: PortValue) -> None:
-        self.get_peripheral().set_device_enabled(self.get_device_friendly_name(), value)
+        await self.get_peripheral().set_device_enabled(self.get_device_friendly_name(), value)
+
+    # This disables the persisted attribute
+    async def attr_is_persisted(self) -> None:
+        return None
