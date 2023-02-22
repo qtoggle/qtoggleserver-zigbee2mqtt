@@ -26,7 +26,8 @@ class PermitJoinPort(Zigbee2MQTTPort):
     async def read_value(self) -> NullablePortValue:
         return self.get_peripheral().is_permit_join()
 
-    async def write_value(self, value: PortValue) -> None:
+    @core_ports.skip_write_unavailable
+    async def write_value(self, value: bool) -> None:
         await self.get_peripheral().set_permit_join(value)
 
 
@@ -84,6 +85,7 @@ class DevicePort(Zigbee2MQTTPort):
         else:
             return value
 
+    @core_ports.skip_write_unavailable
     async def write_value(self, value: PortValue) -> None:
         if await self.get_type() == core_ports.TYPE_BOOLEAN:
             if value:
@@ -177,7 +179,8 @@ class DeviceControlPort(DevicePort):
     async def read_value(self) -> NullablePortValue:
         return self.get_peripheral().is_device_enabled(self.get_device_friendly_name())
 
-    async def write_value(self, value: PortValue) -> None:
+    @core_ports.skip_write_unavailable
+    async def write_value(self, value: bool) -> None:
         await self.get_peripheral().set_device_enabled(self.get_device_friendly_name(), value)
 
     async def attr_get_display_name(self) -> str:
