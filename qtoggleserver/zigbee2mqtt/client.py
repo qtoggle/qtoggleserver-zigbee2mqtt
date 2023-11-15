@@ -5,7 +5,7 @@ import time
 
 from typing import Any, Optional, Union
 
-import asyncio_mqtt as aiomqtt
+import aiomqtt
 
 from qtoggleserver.core import ports as core_ports
 from qtoggleserver.core.typing import GenericJSONDict, GenericJSONList

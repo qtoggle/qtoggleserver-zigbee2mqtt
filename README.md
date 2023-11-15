@@ -48,12 +48,22 @@ Otherwise, install it using pip:
  * type: `string`
  * default: `null`
 
+### `mqtt_client_id`
+
+ * type: `string`
+ * default: `qtoggleserver`
+
 ### `mqtt_reconnect_interval`
 
 Represents the interval, in seconds, between two (re)connection attempts to the MQTT server.
 
  * type: `integer`
  * default: `5`
+
+### `mqtt_base_topic`
+
+ * type: `string`
+ * default: `zigbee2mqtt`
 
 ### `mqtt_logging`
 
