@@ -31,8 +31,7 @@ class Zigbee2MQTTClient(Peripheral):
     _TYPE_MAPPING = {
         'binary': core_ports.TYPE_BOOLEAN,
         'numeric': core_ports.TYPE_NUMBER,
-        core_ports.TYPE_BOOLEAN: 'binary',
-        core_ports.TYPE_NUMBER: 'numeric',
+        'enum': core_ports.TYPE_NUMBER,
     }
 
     def __init__(
@@ -70,6 +69,7 @@ class Zigbee2MQTTClient(Peripheral):
         self._device_state_by_friendly_name: dict[str, tuple[int, GenericJSONDict]] = {}
         self._device_online_by_friendly_name: dict[str, bool] = {}
         self._device_config_by_friendly_name: dict[str, GenericJSONDict] = {}
+        self._safe_friendly_name_dict: dict[str, str] = {}
         self._bridge_info: Optional[GenericJSONDict] = None
         self._pending_requests: dict[str, dict[str, Any]] = {}
         self._update_ports_from_device_info_lock: asyncio.Lock = asyncio.Lock()
@@ -268,6 +268,8 @@ class Zigbee2MQTTClient(Peripheral):
 
         if subtopic == 'availability':
             await self.handle_device_availability_message(friendly_name, payload_str, payload_json)
+        elif subtopic == 'set':
+            await self.handle_device_set_message(friendly_name, payload_json)
         elif not subtopic:
             await self.handle_device_state_message(friendly_name, payload_json)
         else:
@@ -286,7 +288,10 @@ class Zigbee2MQTTClient(Peripheral):
 
         self.debug('device "%s" is now "%s"', friendly_name, state)
         self.trigger_port_update_fire_and_forget()
-        self._device_online_by_friendly_name[friendly_name] = state == 'online'
+        self._device_online_by_friendly_name[friendly_name] = (state == 'online')
+
+    async def handle_device_set_message(self, friendly_name: str, payload_json: GenericJSONDict) -> None:
+        await self.handle_device_state_message(friendly_name, payload_json)
 
     async def handle_device_state_message(self, friendly_name: str, payload_json: GenericJSONDict) -> None:
         processed_payload_json = {}
@@ -366,16 +371,24 @@ class Zigbee2MQTTClient(Peripheral):
         return self._device_state_by_friendly_name.get(friendly_name)
 
     def is_device_online(self, friendly_name: str) -> Optional[bool]:
-        return self._device_online_by_friendly_name.get(friendly_name)
+        return self._device_online_by_friendly_name.get(friendly_name, False)
 
     async def set_device_enabled(self, friendly_name: str, enabled: bool) -> None:
         await self.set_device_config(friendly_name, {'qtoggleserver': {'enabled': enabled}})
 
     def is_device_enabled(self, friendly_name: str) -> bool:
+        # First ensure our device control port is enabled
+        safe_friendly_name = self._safe_friendly_name_dict.get(friendly_name, friendly_name)
+        control_port = self.get_port(safe_friendly_name)
+        if not control_port:
+            return False
+        if not control_port.is_enabled():
+            return False
+
         config = self.get_device_config(friendly_name)
         if not config:
             return False
-        return config.get('qtoggleserver', {}).get('enabled', True)
+        return config.get('qtoggleserver', {}).get('enabled', False)
 
     async def rename_device(self, old_friendly_name: str, new_friendly_name: str) -> None:
         self.debug('renaming device "%s" to "%s"', old_friendly_name, new_friendly_name)
@@ -402,6 +415,7 @@ class Zigbee2MQTTClient(Peripheral):
         ]
 
     async def update_ports_from_device_info(self) -> None:
+        # TODO: create a periodic task to schedule this function to prevent multiple subsequent calls
         self.debug('updating ports from device info')
         async with self._update_ports_from_device_info_lock:
             port_args_list = self._port_args_from_device_info(self._device_info_by_friendly_name)
@@ -432,59 +446,75 @@ class Zigbee2MQTTClient(Peripheral):
         for device_info in device_info_by_friendly_name.values():
             if not device_info.get('definition'):
                 continue
-            if device_info.get('type') != 'EndDevice':
+            if device_info.get('type') not in ('EndDevice', 'Router'):
                 continue
 
             friendly_name = device_info['friendly_name']
-            if re.match(r'^0x[a-f0-9]{16}$', friendly_name):
-                friendly_name = f'device_{friendly_name[2:]}'
+
+            # Ensure we have a device friendly name that's safe for being used as a port id.
+            safe_friendly_name = friendly_name
+            if re.match(r'^0x[a-f0-9]{16}$', safe_friendly_name):
+                safe_friendly_name = f'device_{safe_friendly_name[2:]}'
+            self._safe_friendly_name_dict[friendly_name] = safe_friendly_name
 
             # Build ports from exposed
-            port_args_list = [
-                {
-                    'driver': DeviceControlPort,
-                    'id': '',
-                    'type': core_ports.TYPE_BOOLEAN,
-                    'writable': True,
-                    'device_friendly_name': friendly_name,
-                    'property_name': '',
-                }
-            ]
+            control_port_args = {
+                'driver': DeviceControlPort,
+                'id': safe_friendly_name,
+                'type': core_ports.TYPE_BOOLEAN,
+                'writable': True,
+                'device_friendly_name': friendly_name,
+                'property_name': '',
+            }
+
+            # Using a dict instead of a list here ensures unique property names (and thus ids), only considering the
+            # latest entry.
+            port_args_by_id: dict[str, dict] = {}
 
             for exposed_info in device_info['definition'].get('exposes', []):
-                name = exposed_info['name']
-                name = self._NAME_MAPPING.get(name, name)
-                type_ = self._TYPE_MAPPING.get(exposed_info['type'])
-                if not type_:
-                    continue
-                port_args = {
-                    'driver': DevicePort,
-                    'id': name,
-                    'display_name': name.replace('_', ' ').title(),
-                    'type': type_,
-                    'writable': bool(exposed_info['access'] & 2),
-                    'unit': exposed_info.get('unit'),
-                    'min': exposed_info.get('value_min'),
-                    'max': exposed_info.get('value_max'),
-                    'additional_attrdefs': {},
-                    'device_friendly_name': friendly_name,
-                    'property_name': name,
-                    'value_on': exposed_info.get('value_on', True),
-                    'value_off': exposed_info.get('value_off', False),
-                }
-                port_args_list.append(port_args)
+                if 'features' in exposed_info:
+                    features = exposed_info['features']
+                else:
+                    features = [exposed_info]
+
+                for feature in features:
+                    name = feature['name']
+                    name = self._NAME_MAPPING.get(name, name)
+                    type_ = self._TYPE_MAPPING.get(feature['type'])
+                    if not type_:
+                        continue
+                    port_args = {
+                        'driver': DevicePort,
+                        'id': name,
+                        'display_name': name.replace('_', ' ').title(),
+                        'type': type_,
+                        'writable': bool(feature['access'] & 2),
+                        'unit': feature.get('unit'),
+                        'min': feature.get('value_min'),
+                        'max': feature.get('value_max'),
+                        'additional_attrdefs': {},
+                        'device_friendly_name': friendly_name,
+                        'property_name': name,
+                        'value_on': feature.get('value_on', True),
+                        'value_off': feature.get('value_off', False),
+                        'values': feature.get('values')
+                    }
+                    port_args_by_id[port_args['id']] = port_args
 
             # Build additional attribute definitions from options
             for option_info in device_info['definition'].get('options', []):
                 name = option_info['name']
                 name = self._NAME_MAPPING.get(name, name)
-                for pa in port_args_list:
-                    if name.startswith(f'{pa["id"]}_'):
-                        name = name[len(pa['id']) + 1:]
+
+                # Try to associate the attribute to an existing port, based on `name`. If that's not possible,
+                # add the attribute to the device control port.
+                for id_, pa in port_args_by_id.items():
+                    if name.startswith(f'{id_}_'):
+                        name = name[len(id_) + 1:]
                         port_args = pa
                         break
                 else:
-                    port_args = port_args_list[0]
+                    port_args = control_port_args
 
                 type_ = self._TYPE_MAPPING.get(option_info['type'])
                 if not type_:
@@ -500,10 +530,11 @@ class Zigbee2MQTTClient(Peripheral):
                     'persisted': False,
                 }
 
-            for pa in port_args_list:
-                pa['id'] = f'{friendly_name}.{pa["id"]}' if pa['id'] else friendly_name
+            # Ensure port id prefix
+            for pa in port_args_by_id.values():
+                pa['id'] = f'{safe_friendly_name}.{pa["id"]}'
 
-            all_port_args_list += port_args_list
+            all_port_args_list += [control_port_args] + list(port_args_by_id.values())
 
         return all_port_args_list
 

@@ -47,6 +47,7 @@ class DevicePort(Zigbee2MQTTPort):
         property_name: str,
         value_on: Any = True,
         value_off: Any = False,
+        values: Optional[list[str]] = None,
         **kwargs,
     ) -> None:
         super().__init__(id=id, **kwargs)
@@ -64,6 +65,18 @@ class DevicePort(Zigbee2MQTTPort):
         self._property_name: str = property_name
         self._value_on: Any = value_on
         self._value_off: Any = value_off
+        self._values: Optional[list[str]] = values
+
+        if values:
+            # This will determine the actual `choices` attribute value
+            self._choices = [
+                {
+                    'value': i + 1,
+                    'display_name': ' '.join(x.capitalize() for x in v.split('_'))
+                }
+                for i, v in enumerate(values)
+            ]
+            self._values_dict: dict[str, int] = {v: i for i, v in enumerate(values)}
 
     def _get_additional_attrdefs(self) -> AttributeDefinitions:
         return self._additional_attrdefs
@@ -81,9 +94,15 @@ class DevicePort(Zigbee2MQTTPort):
             return
 
         if await self.get_type() == core_ports.TYPE_BOOLEAN:
-            return value == self._value_on
-        else:
-            return value
+            value = (value == self._value_on)
+        elif self._values:  # map Z2M value to choice
+            try:
+                value = self._values_dict[value] + 1
+            except KeyError:
+                self.error('got an unexpected choice: %s', value)
+                value = None
+
+        return value
 
     @core_ports.skip_write_unavailable
     async def write_value(self, value: PortValue) -> None:
@@ -92,6 +111,11 @@ class DevicePort(Zigbee2MQTTPort):
                 value = self._value_on
             else:
                 value = self._value_off
+        elif self._values:  # map choice to Z2M value
+            try:
+                value = self._values[value - 1]
+            except IndexError:
+                raise ValueError(f'Invalid choice: {value}')
 
         await self.get_peripheral().set_device_property(
             self.get_device_friendly_name(), self.get_property_name(), value
@@ -165,11 +189,11 @@ class DeviceControlPort(DevicePort):
 
         # Delay the actual renaming call a bit, so that this attribute setter completes and triggers the `port-update`
         # event for this port *before* it is removed.
-        asyncio.create_task(
+
+        asyncio_utils.fire_and_forget(
             asyncio_utils.await_later(1, self.get_peripheral().rename_device(old_device_friendly_name, value))
         )
-
-        asyncio.create_task(
+        asyncio_utils.fire_and_forget(
             asyncio_utils.await_later(2, self.enable_renamed_ports(set(device_enabled_port_ids), value))
         )
 
@@ -190,3 +214,11 @@ class DeviceControlPort(DevicePort):
 
     async def attr_set_display_name(self, value: str) -> None:
         await self.get_peripheral().set_device_config(self.get_device_friendly_name(), {'description': value})
+
+    async def handle_enable(self) -> None:
+        await super().handle_enable()
+        asyncio_utils.fire_and_forget(self.get_peripheral().update_ports_from_device_info())
+
+    async def handle_disable(self) -> None:
+        await super().handle_enable()
+        asyncio_utils.fire_and_forget(self.get_peripheral().update_ports_from_device_info())
