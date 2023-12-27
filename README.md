@@ -15,10 +15,10 @@ for Zigbee devices controlled by [Zigbee2MQTT](https://www.zigbee2mqtt.io/).
 
 ## Install
 
-If you run [qToggleOS](https://github.com/qtoggle/qtoggleos), this add-on is already installed. You'll need, however, to
-enable [Zigbee](https://github.com/qtoggle/qtoggleos/wiki/Zigbee) support.
+If you run [qToggleOS](https://github.com/qtoggle/qtoggleos), you'll need
+[Zigbee](https://github.com/qtoggle/qtoggleos/wiki/Zigbee) support.
 
-Otherwise, install it using pip:
+Install using pip:
 
     pip install qtoggleserver-zigbee2mqtt
 
