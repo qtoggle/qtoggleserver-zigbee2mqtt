@@ -90,17 +90,16 @@ class Zigbee2MQTTClient(Peripheral):
                     port=self.mqtt_port,
                     username=self.mqtt_username,
                     password=self.mqtt_password,
-                    client_id=self.mqtt_client_id,
+                    identifier=self.mqtt_client_id,
                     logger=self.mqtt_logger,
                 ) as client:
                     self._mqtt_client = client
-                    async with client.messages() as messages:
-                        await client.subscribe(f'{self.mqtt_base_topic}/#')
-                        async for message in messages:
-                            try:
-                                await self.handle_mqtt_message(str(message.topic), message.payload)
-                            except Exception:
-                                self.error('failed to handle MQTT message', exc_info=True)
+                    await client.subscribe(f'{self.mqtt_base_topic}/#')
+                    async for message in client.messages:
+                        try:
+                            await self.handle_mqtt_message(str(message.topic), message.payload)
+                        except Exception:
+                            self.error('failed to handle MQTT message', exc_info=True)
             except asyncio.CancelledError:
                 self.debug('client task cancelled')
                 self._mqtt_client = None

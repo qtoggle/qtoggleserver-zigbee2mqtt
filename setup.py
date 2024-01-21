@@ -12,6 +12,6 @@ setup(
     packages=find_namespace_packages(),
 
     install_requires=[
-        'aiomqtt',
+        'aiomqtt>=2.0',
     ]
 )
