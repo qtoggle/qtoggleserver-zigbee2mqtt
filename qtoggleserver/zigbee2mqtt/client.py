@@ -406,6 +406,11 @@ class Zigbee2MQTTClient(Peripheral):
 
         await self.do_request('device/rename', {'from': old_friendly_name, 'to': new_friendly_name})
 
+    async def remove_device(self, friendly_name: str) -> None:
+        self.debug('removing device "%s"', friendly_name)
+
+        await self.do_request('device/remove', {'id': friendly_name, 'force': True})
+
     async def make_port_args(self) -> list[dict[str, Any]]:
         return [
             {

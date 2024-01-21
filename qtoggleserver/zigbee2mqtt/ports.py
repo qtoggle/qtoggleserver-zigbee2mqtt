@@ -138,7 +138,7 @@ class DeviceControlPort(DevicePort):
     ADDITIONAL_ATTRDEFS = {
         'friendly_name': {
             'display_name': 'Friendly Name',
-            'description': 'Use this attribute to rename your Zigbee device',
+            'description': 'Use this attribute to rename your Zigbee device. Set to empty string to remove the device.',
             'type': 'string',
             'modifiable': True,
             'persisted': False,
@@ -173,29 +173,37 @@ class DeviceControlPort(DevicePort):
                 await port.save()
 
     async def attr_set_friendly_name(self, value: str) -> None:
-        old_device_friendly_name = self.get_device_friendly_name()
+        current_device_friendly_name = self.get_device_friendly_name()
 
-        # Remember enabled ports before they are renamed (practically removed and re-added)
-        all_enabled_port_ids = [p.get_initial_id() for p in self.get_peripheral().get_device_ports() if p.is_enabled()]
-        device_enabled_port_ids = []
-        for port_id in all_enabled_port_ids:
-            if port_id == old_device_friendly_name:
-                port_id = value
-            elif port_id.startswith(f'{old_device_friendly_name}.'):
-                port_id = f'{value}.{port_id[len(old_device_friendly_name) + 1:]}'
-            else:
-                continue
-            device_enabled_port_ids.append(port_id)
+        if value:
+            # Remember enabled ports before they are renamed (practically removed and re-added)
+            all_enabled_port_ids = [p.get_initial_id() for p in self.get_peripheral().get_device_ports() if p.is_enabled()]
+            device_enabled_port_ids = []
+            for port_id in all_enabled_port_ids:
+                if port_id == current_device_friendly_name:
+                    port_id = value
+                elif port_id.startswith(f'{current_device_friendly_name}.'):
+                    port_id = f'{value}.{port_id[len(current_device_friendly_name) + 1:]}'
+                else:
+                    continue
+                device_enabled_port_ids.append(port_id)
 
-        # Delay the actual renaming call a bit, so that this attribute setter completes and triggers the `port-update`
-        # event for this port *before* it is removed.
+            # Delay the actual renaming call a bit, so that this attribute setter completes and triggers the
+            # `port-update` event for this port *before* it is removed.
 
-        asyncio_utils.fire_and_forget(
-            asyncio_utils.await_later(1, self.get_peripheral().rename_device(old_device_friendly_name, value))
-        )
-        asyncio_utils.fire_and_forget(
-            asyncio_utils.await_later(2, self.enable_renamed_ports(set(device_enabled_port_ids), value))
-        )
+            asyncio_utils.fire_and_forget(
+                asyncio_utils.await_later(1, self.get_peripheral().rename_device(current_device_friendly_name, value))
+            )
+            asyncio_utils.fire_and_forget(
+                asyncio_utils.await_later(2, self.enable_renamed_ports(set(device_enabled_port_ids), value))
+            )
+        else:
+            # Delay the actual renaming call a bit, so that this attribute setter completes and triggers the
+            # `port-update` event for this port *before* it is removed.
+
+            asyncio_utils.fire_and_forget(
+                asyncio_utils.await_later(1, self.get_peripheral().remove_device(current_device_friendly_name))
+            )
 
     async def attr_get_friendly_name(self) -> str:
         return self.get_device_friendly_name()
