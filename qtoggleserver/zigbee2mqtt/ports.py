@@ -5,7 +5,7 @@ from typing import cast, Any, Optional
 
 from qtoggleserver.peripherals import PeripheralPort
 from qtoggleserver.core import ports as core_ports
-from qtoggleserver.core.typing import AttributeDefinitions, NullablePortValue, PortValue
+from qtoggleserver.core.typing import Attribute, AttributeDefinitions, NullablePortValue, PortValue
 from qtoggleserver.utils import asyncio as asyncio_utils
 
 from .client import Zigbee2MQTTClient
@@ -78,10 +78,55 @@ class DevicePort(Zigbee2MQTTPort):
             ]
             self._values_dict: dict[str, int] = {v: i for i, v in enumerate(values)}
 
-    def _get_additional_attrdefs(self) -> AttributeDefinitions:
-        return self._additional_attrdefs
+    async def get_additional_attrdefs(self) -> AttributeDefinitions:
+        return self.ADDITIONAL_ATTRDEFS | self._additional_attrdefs
 
-    ADDITIONAL_ATTRDEFS = property(_get_additional_attrdefs)
+    async def attr_get_value(self, name: str) -> Optional[Attribute]:
+        timestamped_state = self.get_peripheral().get_device_state(self.get_device_friendly_name())
+        if not timestamped_state:
+            return
+
+        timestamp, state = timestamped_state
+        value = state.get(name)
+        if value is None:
+            return
+
+        attrdefs = await self.get_attrdefs()
+        attrdef = attrdefs.get(name)
+        if not attrdef:
+            return value
+
+        if attrdef.get('type') == 'boolean':
+            value = (value == attrdef.get('value_on', True))
+        elif attrdef.get('values'):  # map Z2M value to choice
+            try:
+                value = attrdef['values_dict'][value] + 1
+            except KeyError:
+                self.error('got an unexpected choice: %s', value)
+                value = None
+
+        return value
+
+    async def attr_set_value(self, name: str, value: Attribute) -> None:
+        attrdefs = await self.get_attrdefs()
+        attrdef = attrdefs.get(name)
+        if not attrdef:
+            return
+
+        if attrdef.get('type') == 'boolean':
+            if value:
+                value = attrdef.get('value_on', True)
+            else:
+                value = attrdef.get('value_off', False)
+        elif attrdef.get('values'):  # map choice to Z2M value
+            try:
+                value = attrdef.get('values', [])[value - 1]
+            except IndexError:
+                raise ValueError(f'Invalid choice: {value}')
+
+        await self.get_peripheral().set_device_property(
+            self.get_device_friendly_name(), name, value
+        )
 
     async def read_value(self) -> NullablePortValue:
         timestamped_state = self.get_peripheral().get_device_state(self.get_device_friendly_name())
