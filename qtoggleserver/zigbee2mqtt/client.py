@@ -72,7 +72,8 @@ class Zigbee2MQTTClient(Peripheral):
         self._safe_friendly_name_dict: dict[str, str] = {}
         self._bridge_info: Optional[GenericJSONDict] = None
         self._pending_requests: dict[str, dict[str, Any]] = {}
-        self._update_ports_from_device_info_lock: asyncio.Lock = asyncio.Lock()
+        self._update_ports_from_device_info_task: Optional[asyncio.Task] = None
+        self._update_ports_from_device_info_scheduled: bool = False
 
         super().__init__(**kwargs)
 
@@ -112,24 +113,47 @@ class Zigbee2MQTTClient(Peripheral):
                 await asyncio.sleep(self.mqtt_reconnect_interval)
 
     def _start_client_task(self) -> None:
-        self._client_task = asyncio.create_task(self._client_loop())
+        if not self._client_task:
+            self._client_task = asyncio.create_task(self._client_loop())
+
+    def _start_update_ports_from_device_info_task(self) -> None:
+        if not self._update_ports_from_device_info_task:
+            self._update_ports_from_device_info_task = asyncio.create_task(
+                self._update_ports_from_device_info_loop()
+            )
 
     async def _stop_client_task(self) -> None:
-        self._client_task.cancel()
-        await self._client_task
-        self._client_task = None
+        if self._client_task:
+            self._client_task.cancel()
+            await self._client_task
+            self._client_task = None
+
+    async def _stop_update_ports_from_device_info_task(self) -> None:
+        if self._update_ports_from_device_info_task:
+            self._update_ports_from_device_info_task.cancel()
+            await self._update_ports_from_device_info_task
+            self._update_ports_from_device_info_task = None
 
     async def handle_enable(self) -> None:
-        if not self._client_task:
-            self._start_client_task()
+        self._start_client_task()
+        self._start_update_ports_from_device_info_task()
 
     async def handle_disable(self) -> None:
-        if self._client_task:
-            await self._stop_client_task()
+        await self._stop_client_task()
+        await self._stop_update_ports_from_device_info_task()
 
     async def handle_cleanup(self) -> None:
-        if self._client_task:
-            await self._stop_client_task()
+        await self._stop_client_task()
+        await self._stop_update_ports_from_device_info_task()
+
+    async def publish_mqtt_message(self, topic: str, payload: Any) -> None:
+        if isinstance(payload, str):
+            payload_str = payload
+        else:
+            payload_str = json_utils.dumps(payload)
+
+        self.debug('publishing MQTT message on topic "%s": "%s"', topic, payload_str)
+        await self._mqtt_client.publish(topic, payload_str)
 
     async def handle_mqtt_message(self, topic: str, payload: bytes) -> None:
         try:
@@ -208,7 +232,7 @@ class Zigbee2MQTTClient(Peripheral):
             config['ieee_address'] = ieee_address
             self._device_config_by_friendly_name[friendly_name] = config
 
-        await self.update_ports_from_device_info()
+        self.update_ports_from_device_info_asap()
 
     async def handle_bridge_logging_message(self, payload_json: GenericJSONDict) -> None:
         if not self.bridge_logging:
@@ -226,7 +250,7 @@ class Zigbee2MQTTClient(Peripheral):
 
     async def handle_bridge_devices_message(self, payload_json: GenericJSONList) -> None:
         self._device_info_by_friendly_name = {d['friendly_name']: d for d in payload_json}
-        await self.update_ports_from_device_info()
+        self.update_ports_from_device_info_asap()
 
     async def handle_bridge_groups_message(self, payload_json: GenericJSONList) -> None:
         pass
@@ -267,6 +291,8 @@ class Zigbee2MQTTClient(Peripheral):
 
         if subtopic == 'availability':
             await self.handle_device_availability_message(friendly_name, payload_str, payload_json)
+        elif subtopic == 'get':
+            await self.handle_device_get_message(friendly_name, payload_json)
         elif subtopic == 'set':
             await self.handle_device_set_message(friendly_name, payload_json)
         elif not subtopic:
@@ -289,6 +315,9 @@ class Zigbee2MQTTClient(Peripheral):
         self.trigger_port_update_fire_and_forget()
         self._device_online_by_friendly_name[friendly_name] = (state == 'online')
 
+    async def handle_device_get_message(self, friendly_name: str, payload_json: GenericJSONDict) -> None:
+        pass
+
     async def handle_device_set_message(self, friendly_name: str, payload_json: GenericJSONDict) -> None:
         await self.handle_device_state_message(friendly_name, payload_json)
 
@@ -298,20 +327,19 @@ class Zigbee2MQTTClient(Peripheral):
             n = self._NAME_MAPPING.get(n, n)
             processed_payload_json[n] = v
 
-        self._device_state_by_friendly_name[friendly_name] = int(time.time()), processed_payload_json
+        _, state = self._device_state_by_friendly_name.get(friendly_name, (0, {}))
+        state.update(processed_payload_json)
+        self._device_state_by_friendly_name[friendly_name] = int(time.time()), state
 
     async def do_request(self, subtopic: str, payload_json: GenericJSONDict) -> tuple[str, GenericJSONDict]:
         if not self._mqtt_client:
             raise ClientNotConnected()
 
+        topic = f'{self.mqtt_base_topic}/bridge/request/{subtopic}'
         transaction_id = self._make_transaction_id()
         payload_json = dict(payload_json)
         payload_json['transaction'] = transaction_id
-        payload_str = json_utils.dumps(payload_json)
-
-        topic = f'{self.mqtt_base_topic}/bridge/request/{subtopic}'
-        self.debug('publishing MQTT message on topic "%s": "%s"', topic, payload_str)
-        await self._mqtt_client.publish(topic, payload_str)
+        await self.publish_mqtt_message(topic, payload_json)
 
         condition = asyncio.Condition()
         self._pending_requests[transaction_id] = {
@@ -332,14 +360,18 @@ class Zigbee2MQTTClient(Peripheral):
             finally:
                 self._pending_requests.pop(transaction_id, None)
 
+    async def query_device_state(self, friendly_name: str) -> None:
+        self.debug('querying device "%s" state', friendly_name)
+        topic = f'{self.mqtt_base_topic}/{friendly_name}/get'
+        payload_json = {'state': ''}
+
+        await self.publish_mqtt_message(topic, payload_json)
+
     async def set_device_property(self, friendly_name: str, property_name: str, value: Any) -> None:
         self.debug('setting device "%s" property "%s" to %s', friendly_name, property_name, json_utils.dumps(value))
-        payload_json = {property_name: value}
-        payload_str = json_utils.dumps(payload_json)
-
         topic = f'{self.mqtt_base_topic}/{friendly_name}/set'
-        self.debug('publishing MQTT message on topic "%s": "%s"', topic, payload_str)
-        await self._mqtt_client.publish(topic, payload_str)
+        payload_json = {property_name: value}
+        await self.publish_mqtt_message(topic, payload_json)
 
     async def set_device_config(self, friendly_name: str, config: Any) -> None:
         self.debug('setting device "%s" config "%s"', friendly_name, json_utils.dumps(config))
@@ -418,29 +450,50 @@ class Zigbee2MQTTClient(Peripheral):
             }
         ]
 
-    async def update_ports_from_device_info(self) -> None:
-        # TODO: create a periodic task to schedule this function to prevent multiple subsequent calls
+    def update_ports_from_device_info_asap(self) -> None:
+        self.debug('will update ports from device info asap')
+        self._update_ports_from_device_info_scheduled = True
+
+    async def _update_ports_from_device_info_loop(self) -> None:
+        try:
+            while True:
+                try:
+                    if self._update_ports_from_device_info_scheduled:
+                        self._update_ports_from_device_info_scheduled = False
+                        await self._update_ports_from_device_info()
+                except Exception:
+                    self.error('error while updating ports from device info', exc_info=True)
+
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            self.debug('updating ports from device info task cancelled', exc_info=True)
+
+    async def _update_ports_from_device_info(self) -> None:
         self.debug('updating ports from device info')
-        async with self._update_ports_from_device_info_lock:
-            port_args_list = self._port_args_from_device_info(self._device_info_by_friendly_name)
-            ports_by_id = {p.get_initial_id(): p for p in self.get_device_ports()}
-            port_args_list_by_id = {
-                pa['id']: pa
-                for pa in port_args_list
-                if self.is_device_enabled(pa['device_friendly_name']) or issubclass(pa['driver'], DeviceControlPort)
-            }
+        port_args_list = self._port_args_from_device_info(self._device_info_by_friendly_name)
+        ports_by_id = {p.get_initial_id(): p for p in self.get_device_ports()}
+        port_args_list_by_id = {
+            pa['id']: pa
+            for pa in port_args_list
+            if self.is_device_enabled(pa['device_friendly_name']) or issubclass(pa['driver'], DeviceControlPort)
+        }
 
-            # Remove all ports that no longer exist on the bridge
-            for existing_id in ports_by_id:
-                if existing_id not in port_args_list_by_id:
-                    self.debug('port %s has been removed from the bridge', existing_id)
-                    await self.remove_port(existing_id)
+        # Remove all ports that no longer exist on the bridge
+        for existing_id in ports_by_id:
+            if existing_id not in port_args_list_by_id:
+                self.debug('port %s has been removed from the bridge', existing_id)
+                await self.remove_port(existing_id)
 
-            # Add all ports that don't yet exist on the server
-            for new_id, port_args in port_args_list_by_id.items():
-                if new_id not in ports_by_id:
-                    self.debug('new port %s detected', new_id)
-                    await self.add_port(port_args)
+        # Add all ports that don't yet exist on the server
+        for new_id, port_args in port_args_list_by_id.items():
+            if new_id not in ports_by_id:
+                self.debug('new port %s detected', new_id)
+                await self.add_port(port_args)
+
+        for friendly_name, online in self._device_online_by_friendly_name.items():
+            if not online:
+                continue
+            await self.query_device_state(friendly_name)
 
     def _port_args_from_device_info(
         self,
@@ -469,6 +522,7 @@ class Zigbee2MQTTClient(Peripheral):
                 'writable': True,
                 'device_friendly_name': friendly_name,
                 'property_name': '',
+                'additional_attrdefs': {},
             }
 
             # Using a dict instead of a list here ensures unique property names (and thus ids), only considering the
@@ -482,9 +536,11 @@ class Zigbee2MQTTClient(Peripheral):
                     features = [exposed_info]
 
                 for feature in features:
-                    name = feature['name']
+                    name = feature.get('property') or feature.get('name')
+                    if not name:
+                        continue
                     name = self._NAME_MAPPING.get(name, name)
-                    type_ = self._TYPE_MAPPING.get(feature['type'])
+                    type_ = self._TYPE_MAPPING.get(feature.get('type'))
                     if not type_:
                         continue
                     port_args = {
