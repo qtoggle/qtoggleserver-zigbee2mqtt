@@ -74,6 +74,7 @@ class Zigbee2MQTTClient(Peripheral):
         self._device_state_by_friendly_name: dict[str, tuple[int, GenericJSONDict]] = {}
         self._device_online_by_friendly_name: dict[str, bool] = {}
         self._device_config_by_friendly_name: dict[str, GenericJSONDict] = {}
+        self._endpoints_by_friendly_name: dict[str, set] = {}  # used as a hack to get some property states
         self._safe_friendly_name_dict: dict[str, str] = {}
         self._bridge_info: Optional[GenericJSONDict] = None
         self._pending_requests: dict[str, dict[str, Any]] = {}
@@ -332,6 +333,7 @@ class Zigbee2MQTTClient(Peripheral):
         await self.handle_device_state_message(friendly_name, payload_json)
 
     async def handle_device_state_message(self, friendly_name: str, payload_json: GenericJSONDict) -> None:
+        self.debug('got device "%s" state: "%s"', friendly_name, json_utils.dumps(payload_json))
         processed_payload_json = {}
         for n, v in payload_json.items():
             n = self._NAME_MAPPING.get(n, n)
@@ -340,6 +342,14 @@ class Zigbee2MQTTClient(Peripheral):
         _, state = self._device_state_by_friendly_name.get(friendly_name, (0, {}))
         state.update(processed_payload_json)
         self._device_state_by_friendly_name[friendly_name] = int(time.time()), state
+
+        # Trigger port-update on all affected ports
+        ports = self.get_device_ports(friendly_name)
+        for port in ports:
+            port.invalidate_attrs()
+            if port.is_enabled():
+                await port.trigger_update()
+                port.save_asap()
 
     async def do_request(self, subtopic: str, payload_json: GenericJSONDict) -> tuple[str, GenericJSONDict]:
         if not self._mqtt_client:
@@ -412,8 +422,22 @@ class Zigbee2MQTTClient(Peripheral):
     def get_device_info(self, friendly_name: str) -> Optional[GenericJSONDict]:
         return self._device_info_by_friendly_name.get(friendly_name)
 
-    def get_device_state(self, friendly_name: str) -> Optional[tuple[int, GenericJSONDict]]:
-        return self._device_state_by_friendly_name.get(friendly_name)
+    def get_device_property(self, friendly_name: str, property_name: str) -> Any:
+        timestamped_state = self._device_state_by_friendly_name.get(friendly_name)
+        if not timestamped_state:
+            return
+
+        timestamp, state = timestamped_state
+        value = state.get(property_name)
+        if value is None:
+            # Try the variant where the property name is suffixed with one of the end points in the state dict,
+            # such as `power_on_behavior_l1`.
+            for endpoint in self._endpoints_by_friendly_name.get(friendly_name, []):
+                value = state.get(f'{property_name}_{endpoint}')
+                if value is not None:
+                    return value
+
+        return value
 
     def is_device_online(self, friendly_name: str) -> Optional[bool]:
         return self._device_online_by_friendly_name.get(friendly_name, False)
@@ -497,15 +521,20 @@ class Zigbee2MQTTClient(Peripheral):
                 await self.remove_port(existing_id)
 
         # Add all ports that don't yet exist on the server
+        changed_friendly_names = set()
         for new_id, port_args in port_args_list_by_id.items():
             if new_id not in ports_by_id:
                 self.debug('new port %s detected', new_id)
+                changed_friendly_names.add(port_args['device_friendly_name'])
                 await self.add_port(port_args)
 
-        for friendly_name, online in self._device_online_by_friendly_name.items():
-            if not online:
-                continue
-            await self.query_device_state(friendly_name)
+        if self._mqtt_client:
+            for friendly_name, online in self._device_online_by_friendly_name.items():
+                if not online:
+                    continue
+                if friendly_name not in changed_friendly_names:
+                    continue
+                await self.query_device_state(friendly_name)
 
     def _port_args_from_device_info(
         self,
@@ -573,34 +602,51 @@ class Zigbee2MQTTClient(Peripheral):
                     }
                     port_args_by_id[port_args['id']] = port_args
 
-            # Build additional attribute definitions from options
-            for option_info in device_info['definition'].get('options', []):
-                name = option_info['name']
+            # Build additional attribute definitions from options and exposed non-features
+            for info in exposed_non_features + force_attribute_features:
+                name = info['name']
                 name = self._NAME_MAPPING.get(name, name)
 
-                # Try to associate the attribute to an existing port, based on `name`. If that's not possible,
-                # add the attribute to the device control port.
-                for id_, pa in port_args_by_id.items():
-                    if name.startswith(f'{id_}_'):
-                        name = name[len(id_) + 1:]
-                        port_args = pa
-                        break
-                else:
-                    port_args = control_port_args
-
-                type_ = self._TYPE_MAPPING.get(option_info['type'])
+                type_ = self._TYPE_MAPPING.get(info['type'])
                 if not type_:
                     continue
-                port_args['additional_attrdefs'][name] = {
+
+                choices = None
+                values = info.get('values')
+                values_dict = None
+                if values:
+                    choices = [
+                        {
+                            'value': i + 1,
+                            'display_name': ' '.join(x.capitalize() for x in v.split('_'))
+                        }
+                        for i, v in enumerate(values)
+                    ]
+                    values_dict = {v: i for i, v in enumerate(values)}
+
+                attrdef = {
                     'display_name': name.replace('_', ' ').title(),
-                    'description': option_info['description'],
                     'type': type_,
-                    'modifiable': bool(option_info['access'] & 2),
-                    'unit': option_info.get('unit'),
-                    'min': option_info.get('value_min'),
-                    'max': option_info.get('value_max'),
+                    'modifiable': bool(info.get('access', 0) & 2),
                     'persisted': False,
                 }
+                if info.get('description'):
+                    attrdef['description'] = info['description']
+                if info.get('unit'):
+                    attrdef['unit'] = info['unit']
+                if info.get('value_min') is not None:
+                    attrdef['min'] = info['value_min']
+                if info.get('value_max') is not None:
+                    attrdef['max'] = info['value_max']
+                if type_ == 'boolean':
+                    attrdef['_value_on'] = info.get('value_on', True)
+                    attrdef['_value_off'] = info.get('value_off', False)
+                if values:
+                    attrdef['_values'] = values
+                    attrdef['_values_dict'] = values_dict
+                    attrdef['choices'] = choices
+
+                control_port_args['additional_attrdefs'][name] = attrdef
 
             # Ensure port id prefix
             for pa in port_args_by_id.values():
