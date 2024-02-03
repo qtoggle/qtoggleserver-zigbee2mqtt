@@ -1,6 +1,7 @@
  * [About](#about)
  * [Install](#install)
  * [Peripheral Driver & Parameters](#peripheral-driver--parameters)
+ * [Device Configuration](#device-configuration)
 
 ---
 
@@ -63,7 +64,7 @@ Represents the interval, in seconds, between two (re)connection attempts to the 
 ### `mqtt_base_topic`
 
  * type: `string`
- * default: `zigbee2mqtt`
+ * default: `"zigbee2mqtt"`
 
 ### `mqtt_logging`
 
@@ -93,3 +94,48 @@ Indicates the timeout, in seconds, to permit new Zigbee devices to join, once en
 
  * type: `integer`
  * default: `3600`
+
+### `device_config`
+
+Allows specifying static configuration for particular Zigbee devices. Each entry in the dictionary is the (friendly)
+name of a device associated to a configuration dictionary. See [Device Configuration](#device-configuration) for details
+on the available configuration options.
+
+ * type: `dictionary`
+ * default: `{}`
+
+
+## Device Configuration
+
+The following configuration options are available for a device:
+
+### `get_state_property`
+
+Some Zigbee devices won't allow obtaining the current state by doing a `get {"state": ""}`. Instead, they need one
+of the specific properties to be requested, such as `get {"temperature": ""}`. This option allows setting the name of
+this property. See 
+[zigbee2mqtt/FRIENDLY_NAME/get](https://www.zigbee2mqtt.io/guide/usage/mqtt_topics_and_messages.html#zigbee2mqtt-friendly-name-get)
+for details.
+
+ * type: `string`
+ * default: `"state"`
+
+### `force_port_properties`
+
+By default, exposed information that is not marked as *feature* will be treated as an attribute of the corresponding
+qToggle control port. This option allows specifying a list of property names that will be associated to qToggle ports,
+even though they haven't been marked as *features* by zigbee2mqtt. See
+[zigbee2mqtt exposes](https://www.zigbee2mqtt.io/guide/usage/exposes.html#exposes) for details.
+
+ * type: `[string]`
+ * default: `[]`
+
+### `force_attribute_properties`
+
+By default, exposed information that is marked as *feature* will be treated as a qToggle port. This option allows
+specifying a list of property names that will become attributes of the corresponding control port, even though they
+have been marked as *features* by zigbee2mqtt. See
+[zigbee2mqtt exposes](https://www.zigbee2mqtt.io/guide/usage/exposes.html#exposes) for details.
+
+ * type: `[string]`
+ * default: `[]`

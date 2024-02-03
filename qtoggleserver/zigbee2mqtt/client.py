@@ -555,6 +555,12 @@ class Zigbee2MQTTClient(Peripheral):
                 safe_friendly_name = f'device_{safe_friendly_name[2:]}'
             self._safe_friendly_name_dict[friendly_name] = safe_friendly_name
 
+            endpoints = self._endpoints_by_friendly_name[friendly_name] = set()
+
+            device_config = self.get_device_config(friendly_name)
+            force_attribute_properties = device_config.get('force_attribute_properties', set())
+            force_port_properties = device_config.get('force_port_properties', set())
+
             # Build ports from exposed
             control_port_args = {
                 'driver': DeviceControlPort,
@@ -570,11 +576,22 @@ class Zigbee2MQTTClient(Peripheral):
             # latest entry.
             port_args_by_id: dict[str, dict] = {}
 
+            # Build ports from features
+            exposed_non_features = []
+            force_attribute_features = []
             for exposed_info in device_info['definition'].get('exposes', []):
-                if 'features' in exposed_info:
-                    features = exposed_info['features']
-                else:
-                    features = [exposed_info]
+                if 'endpoint' in exposed_info:
+                    endpoints.add(exposed_info['endpoint'])
+
+                features = exposed_info.get('features', [])
+                name = exposed_info.get('property') or exposed_info.get('name')
+                if name in force_port_properties:
+                    # If this exposed info has been forced as a port, consider it a feature itseld
+                    features.append(exposed_info)
+                if not features:
+                    # Exposed info without features becomes attribute of control port
+                    exposed_non_features.append(exposed_info)
+                    continue
 
                 for feature in features:
                     name = feature.get('property') or feature.get('name')
@@ -584,6 +601,9 @@ class Zigbee2MQTTClient(Peripheral):
                     type_ = self._TYPE_MAPPING.get(feature.get('type'))
                     if not type_:
                         continue
+                    if name in force_attribute_properties:
+                        force_attribute_features.append(feature)
+
                     port_args = {
                         'driver': DevicePort,
                         'id': name,
@@ -606,6 +626,8 @@ class Zigbee2MQTTClient(Peripheral):
             for info in exposed_non_features + force_attribute_features:
                 name = info['name']
                 name = self._NAME_MAPPING.get(name, name)
+                if name in force_port_properties:
+                    continue
 
                 type_ = self._TYPE_MAPPING.get(info['type'])
                 if not type_:

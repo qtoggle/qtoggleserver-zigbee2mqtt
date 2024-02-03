@@ -82,25 +82,20 @@ class DevicePort(Zigbee2MQTTPort):
         return self.ADDITIONAL_ATTRDEFS | self._additional_attrdefs
 
     async def attr_get_value(self, name: str) -> Optional[Attribute]:
-        timestamped_state = self.get_peripheral().get_device_state(self.get_device_friendly_name())
-        if not timestamped_state:
-            return
-
-        timestamp, state = timestamped_state
-        value = state.get(name)
-        if value is None:
-            return
+        value = self.get_peripheral().get_device_property(self.get_device_friendly_name(), name)
 
         attrdefs = await self.get_attrdefs()
         attrdef = attrdefs.get(name)
         if not attrdef:
             return value
+        if value is None:
+            return None
 
         if attrdef.get('type') == 'boolean':
-            value = (value == attrdef.get('value_on', True))
-        elif attrdef.get('values'):  # map Z2M value to choice
+            value = (value == attrdef.get('_value_on', True))
+        elif attrdef.get('_values'):  # map Z2M value to choice
             try:
-                value = attrdef['values_dict'][value] + 1
+                value = attrdef['_values_dict'][value] + 1
             except KeyError:
                 self.error('got an unexpected choice: %s', value)
                 value = None
@@ -115,12 +110,12 @@ class DevicePort(Zigbee2MQTTPort):
 
         if attrdef.get('type') == 'boolean':
             if value:
-                value = attrdef.get('value_on', True)
+                value = attrdef.get('_value_on', True)
             else:
-                value = attrdef.get('value_off', False)
-        elif attrdef.get('values'):  # map choice to Z2M value
+                value = attrdef.get('_value_off', False)
+        elif attrdef.get('_values'):  # map choice to Z2M value
             try:
-                value = attrdef.get('values', [])[value - 1]
+                value = attrdef.get('_values', [])[value - 1]
             except IndexError:
                 raise ValueError(f'Invalid choice: {value}')
 
@@ -129,14 +124,9 @@ class DevicePort(Zigbee2MQTTPort):
         )
 
     async def read_value(self) -> NullablePortValue:
-        timestamped_state = self.get_peripheral().get_device_state(self.get_device_friendly_name())
-        if not timestamped_state:
-            return
-
-        timestamp, state = timestamped_state
-        value = state.get(self.get_property_name())
+        value = self.get_peripheral().get_device_property(self.get_device_friendly_name(), self.get_property_name())
         if value is None:
-            return
+            return None
 
         if await self.get_type() == core_ports.TYPE_BOOLEAN:
             value = (value == self._value_on)
@@ -144,7 +134,6 @@ class DevicePort(Zigbee2MQTTPort):
             try:
                 value = self._values_dict[value] + 1
             except KeyError:
-                self.error('got an unexpected choice: %s', value)
                 value = None
 
         return value
@@ -261,7 +250,7 @@ class DeviceControlPort(DevicePort):
         await self.get_peripheral().set_device_enabled(self.get_device_friendly_name(), value)
 
     async def attr_get_display_name(self) -> str:
-        config = self.get_peripheral().get_device_config(self.get_device_friendly_name()) or {}
+        config = self.get_peripheral().get_device_config(self.get_device_friendly_name())
         info = self.get_peripheral().get_device_info(self.get_device_friendly_name()) or {}
         return config.get('description', info.get('definition', {}).get('description', ''))
 
