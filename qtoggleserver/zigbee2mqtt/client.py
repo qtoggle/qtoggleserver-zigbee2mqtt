@@ -23,6 +23,9 @@ class Zigbee2MQTTClient(Peripheral):
     DEFAULT_BRIDGE_REQUEST_TIMEOUT = 10  # seconds
     DEFAULT_PERMIT_JOIN_TIMEOUT = 3600  # seconds
 
+    _MAX_INCOMING_QUEUE_SIZE = 256
+    _MAX_OUTGOING_QUEUE_SIZE = 256
+
     # Used to adjust names of ports and attributes
     _NAME_MAPPING = {
         'linkquality': 'link_quality',
@@ -93,6 +96,8 @@ class Zigbee2MQTTClient(Peripheral):
                     password=self.mqtt_password,
                     identifier=self.mqtt_client_id,
                     logger=self.mqtt_logger,
+                    max_queued_incoming_messages=self._MAX_INCOMING_QUEUE_SIZE,
+                    max_queued_outgoing_messages=self._MAX_OUTGOING_QUEUE_SIZE,
                 ) as client:
                     self._mqtt_client = client
                     await client.subscribe(f'{self.mqtt_base_topic}/#')
