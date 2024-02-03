@@ -51,6 +51,7 @@ class Zigbee2MQTTClient(Peripheral):
         bridge_logging: bool = False,
         bridge_request_timeout: int = DEFAULT_BRIDGE_REQUEST_TIMEOUT,
         permit_join_timeout: int = DEFAULT_PERMIT_JOIN_TIMEOUT,
+        device_config: Optional[dict[str, GenericJSONDict]] = None,
         **kwargs,
     ) -> None:
         self.mqtt_server: str = mqtt_server
@@ -64,6 +65,7 @@ class Zigbee2MQTTClient(Peripheral):
         self.bridge_logging: bool = bridge_logging
         self.bridge_request_timeout: int = bridge_request_timeout
         self.permit_join_timeout: int = permit_join_timeout
+        self.static_device_config: dict[str, GenericJSONDict] = device_config or {}
 
         self._mqtt_client: Optional[aiomqtt.Client] = None
         self._mqtt_base_topic_len: int = len(mqtt_base_topic)
@@ -367,8 +369,9 @@ class Zigbee2MQTTClient(Peripheral):
 
     async def query_device_state(self, friendly_name: str) -> None:
         self.debug('querying device "%s" state', friendly_name)
+        config = self.get_device_config(friendly_name)
         topic = f'{self.mqtt_base_topic}/{friendly_name}/get'
-        payload_json = {'state': ''}
+        payload_json = {config.get('get_state_property', 'state'): ''}
 
         await self.publish_mqtt_message(topic, payload_json)
 
@@ -382,8 +385,11 @@ class Zigbee2MQTTClient(Peripheral):
         self.debug('setting device "%s" config "%s"', friendly_name, json_utils.dumps(config))
         await self.do_request('device/options', {'id': friendly_name, 'options': config})
 
-    def get_device_config(self, friendly_name: str) -> Optional[GenericJSONDict]:
-        return self._device_config_by_friendly_name.get(friendly_name)
+    def get_device_config(self, friendly_name: str) -> GenericJSONDict:
+        return (
+            self.static_device_config.get(friendly_name, {}) |
+            self._device_config_by_friendly_name.get(friendly_name, {})
+        )
 
     def _make_transaction_id(self) -> str:
         return f'{self.mqtt_client_id}_{int(time.time() * 1000)}'
@@ -422,8 +428,6 @@ class Zigbee2MQTTClient(Peripheral):
             return False
 
         config = self.get_device_config(friendly_name)
-        if not config:
-            return False
         return config.get('qtoggleserver', {}).get('enabled', False)
 
     async def rename_device(self, old_friendly_name: str, new_friendly_name: str) -> None:
