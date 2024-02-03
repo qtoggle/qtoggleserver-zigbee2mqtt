@@ -211,7 +211,9 @@ class DeviceControlPort(DevicePort):
 
         if value:
             # Remember enabled ports before they are renamed (practically removed and re-added)
-            all_enabled_port_ids = [p.get_initial_id() for p in self.get_peripheral().get_device_ports() if p.is_enabled()]
+            all_enabled_port_ids = [
+                p.get_initial_id() for p in self.get_peripheral().get_device_ports() if p.is_enabled()
+            ]
             device_enabled_port_ids = []
             for port_id in all_enabled_port_ids:
                 if port_id == current_device_friendly_name:
