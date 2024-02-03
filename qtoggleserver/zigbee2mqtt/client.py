@@ -159,16 +159,19 @@ class Zigbee2MQTTClient(Peripheral):
         else:
             payload_str = json_utils.dumps(payload)
 
-        self.debug('publishing MQTT message on topic "%s": "%s"', topic, payload_str)
+        if self.mqtt_logging:
+            self.debug('publishing MQTT message on topic "%s": "%s"', topic, payload_str)
         await self._mqtt_client.publish(topic, payload_str)
 
     async def handle_mqtt_message(self, topic: str, payload: bytes) -> None:
         try:
             payload_str = payload.decode()
-            self.debug('incoming MQTT message on topic "%s": "%s"', topic, payload_str)
+            if self.mqtt_logging:
+                self.debug('incoming MQTT message on topic "%s": "%s"', topic, payload_str)
         except ValueError:
             payload_str = None
-            self.debug('incoming MQTT message on topic "%s": "%s"', topic, payload)
+            if self.mqtt_logging:
+                self.debug('incoming MQTT message on topic "%s": "%s"', topic, payload)
 
         try:
             payload_json = json_utils.loads(payload)
