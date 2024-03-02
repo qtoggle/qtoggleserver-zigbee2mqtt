@@ -9,7 +9,7 @@ import aiomqtt
 
 from qtoggleserver.core import ports as core_ports
 from qtoggleserver.core.typing import GenericJSONDict, GenericJSONList
-from qtoggleserver.peripherals import Peripheral, PeripheralPort
+from qtoggleserver.peripherals import Peripheral
 from qtoggleserver.utils import json as json_utils
 
 from .exceptions import ClientNotConnected, ErrorResponse, RequestTimeout
@@ -330,7 +330,7 @@ class Zigbee2MQTTClient(Peripheral):
         pass
 
     async def handle_device_set_message(self, friendly_name: str, payload_json: GenericJSONDict) -> None:
-        await self.handle_device_state_message(friendly_name, payload_json)
+        pass
 
     async def handle_device_state_message(self, friendly_name: str, payload_json: GenericJSONDict) -> None:
         self.debug('got device "%s" state: "%s"', friendly_name, json_utils.dumps(payload_json))
@@ -340,12 +340,34 @@ class Zigbee2MQTTClient(Peripheral):
             processed_payload_json[n] = v
 
         _, state = self._device_state_by_friendly_name.get(friendly_name, (0, {}))
+        old_state = dict(state)
         state.update(processed_payload_json)
         self._device_state_by_friendly_name[friendly_name] = int(time.time()), state
 
-        # Trigger port-update on all affected ports
-        ports = self.get_device_ports(friendly_name)
-        for port in ports:
+        device_ports = self.get_device_ports(friendly_name)
+
+        # Gather all properties that represent port values
+        value_properties = set()
+        for port in device_ports:
+            if not isinstance(port, DeviceControlPort):
+                value_properties.add(port.get_property_name())
+
+        # Gather all properties that have just changed
+        changed_properties = (
+            set(k for k, v in state.items() if v != old_state.get(k)) |
+            set(k for k, v in old_state.items() if v != state.get(k))
+        )
+
+        # If only value properties have changed, don't trigger unnecessary `port-update` events
+        only_values_changed = not (changed_properties - value_properties)
+        if only_values_changed:
+            return
+
+        # Trigger `port-update` on all affected ports
+        for port in device_ports:
+            attr_properties = set(await port.get_additional_attrdefs())
+            if not (attr_properties & changed_properties):
+                continue
             port.invalidate_attrs()
             if port.is_enabled():
                 await port.trigger_update()
@@ -678,7 +700,7 @@ class Zigbee2MQTTClient(Peripheral):
 
         return all_port_args_list
 
-    def get_device_ports(self, friendly_name: Optional[str] = None) -> list[PeripheralPort]:
+    def get_device_ports(self, friendly_name: Optional[str] = None) -> list[DevicePort]:
         if friendly_name:
             return [
                 p for p in self.get_ports()
