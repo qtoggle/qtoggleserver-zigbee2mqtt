@@ -30,6 +30,7 @@ class Zigbee2MQTTClient(Peripheral):
     _NAME_MAPPING = {
         'linkquality': 'link_quality',
     }
+    _REV_NAME_MAPPING = {v: k for k, v in _NAME_MAPPING.items()}
 
     _TYPE_MAPPING = {
         'binary': core_ports.TYPE_BOOLEAN,
@@ -402,17 +403,20 @@ class Zigbee2MQTTClient(Peripheral):
             finally:
                 self._pending_requests.pop(transaction_id, None)
 
-    async def query_device_state(self, friendly_name: str) -> None:
+    async def query_device_state(self, friendly_name: str, properties: Optional[list[str]]) -> None:
         self.debug('querying device "%s" state', friendly_name)
         config = self.get_device_config(friendly_name)
         topic = f'{self.mqtt_base_topic}/{friendly_name}/get'
         payload_json = {config.get('get_state_property', 'state'): ''}
+        if properties:
+            payload_json.update({p: '' for p in properties})
 
         await self.publish_mqtt_message(topic, payload_json)
 
     async def set_device_property(self, friendly_name: str, property_name: str, value: Any) -> None:
         self.debug('setting device "%s" property "%s" to %s', friendly_name, property_name, json_utils.dumps(value))
         topic = f'{self.mqtt_base_topic}/{friendly_name}/set'
+        property_name = self._REV_NAME_MAPPING.get(property_name, property_name)
         payload_json = {property_name: value}
         await self.publish_mqtt_message(topic, payload_json)
 
@@ -467,13 +471,19 @@ class Zigbee2MQTTClient(Peripheral):
     async def set_device_enabled(self, friendly_name: str, enabled: bool) -> None:
         await self.set_device_config(friendly_name, {'qtoggleserver': {'enabled': enabled}})
 
-    def is_device_enabled(self, friendly_name: str) -> bool:
-        # First ensure our device control port is enabled
+    def is_control_port_enabled(self, friendly_name: str) -> bool:
         safe_friendly_name = self._safe_friendly_name_dict.get(friendly_name, friendly_name)
         control_port = self.get_port(safe_friendly_name)
         if not control_port:
             return False
         if not control_port.is_enabled():
+            return False
+
+        return True
+
+    def is_device_enabled(self, friendly_name: str) -> bool:
+        # First ensure our device control port is enabled
+        if not self.is_control_port_enabled(friendly_name):
             return False
 
         config = self.get_device_config(friendly_name)
@@ -530,33 +540,45 @@ class Zigbee2MQTTClient(Peripheral):
         self.debug('updating ports from device info')
         port_args_list = self._port_args_from_device_info(self._device_info_by_friendly_name)
         ports_by_id = {p.get_initial_id(): p for p in self.get_device_ports()}
-        port_args_list_by_id = {
+        port_args_by_id = {
             pa['id']: pa
             for pa in port_args_list
             if self.is_device_enabled(pa['device_friendly_name']) or issubclass(pa['driver'], DeviceControlPort)
         }
+        port_args_list_by_friendly_name: dict[str, list[dict]] = {}
+        for port_args in port_args_list:
+            port_args_list_by_friendly_name.setdefault(port_args['device_friendly_name'], []).append(port_args)
 
         # Remove all ports that no longer exist on the bridge
         for existing_id in ports_by_id:
-            if existing_id not in port_args_list_by_id:
+            if existing_id not in port_args_by_id:
                 self.debug('port %s has been removed from the bridge', existing_id)
                 await self.remove_port(existing_id)
 
         # Add all ports that don't yet exist on the server
         changed_friendly_names = set()
-        for new_id, port_args in port_args_list_by_id.items():
+        for new_id, port_args in port_args_by_id.items():
             if new_id not in ports_by_id:
                 self.debug('new port %s detected', new_id)
                 changed_friendly_names.add(port_args['device_friendly_name'])
                 await self.add_port(port_args)
 
         if self._mqtt_client:
-            for friendly_name, online in self._device_online_by_friendly_name.items():
+            for friendly_name, online in list(self._device_online_by_friendly_name.items()):
                 if not online:
                     continue
                 if friendly_name not in changed_friendly_names:
                     continue
-                await self.query_device_state(friendly_name)
+                if not self.is_control_port_enabled(friendly_name):
+                    continue
+                pal = port_args_list_by_friendly_name.get(friendly_name, [])
+                properties = set()
+                for port_args in pal:
+                    attrdefs = port_args.get('additional_attrdefs', {})
+                    properties = properties.union(self._REV_NAME_MAPPING.get(a, a) for a in attrdefs)
+                    if port_args.get('property_name'):
+                        properties.add(port_args['property_name'])
+                await self.query_device_state(friendly_name, list(properties))
 
     def _port_args_from_device_info(
         self,
