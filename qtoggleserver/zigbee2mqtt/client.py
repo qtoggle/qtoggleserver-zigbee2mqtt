@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import re
@@ -448,6 +450,9 @@ class Zigbee2MQTTClient(Peripheral):
     def get_device_info(self, friendly_name: str) -> Optional[GenericJSONDict]:
         return self._device_info_by_friendly_name.get(friendly_name)
 
+    def get_device_safe_friendly_name(self, friendly_name: str) -> str:
+        return self._safe_friendly_name_dict.get(friendly_name, friendly_name)
+
     def get_device_property(self, friendly_name: str, property_name: str) -> Any:
         timestamped_state = self._device_state_by_friendly_name.get(friendly_name)
         if not timestamped_state:
@@ -472,7 +477,7 @@ class Zigbee2MQTTClient(Peripheral):
         await self.set_device_config(friendly_name, {'qtoggleserver': {'enabled': enabled}})
 
     def is_control_port_enabled(self, friendly_name: str) -> bool:
-        safe_friendly_name = self._safe_friendly_name_dict.get(friendly_name, friendly_name)
+        safe_friendly_name = self.get_device_safe_friendly_name(friendly_name)
         control_port = self.get_port(safe_friendly_name)
         if not control_port:
             return False
@@ -491,8 +496,6 @@ class Zigbee2MQTTClient(Peripheral):
 
     async def rename_device(self, old_friendly_name: str, new_friendly_name: str) -> None:
         self.debug('renaming device "%s" to "%s"', old_friendly_name, new_friendly_name)
-        if re.match(r'^device_[a-f0-9]{16}$', old_friendly_name):
-            old_friendly_name = f'0x{old_friendly_name[7:]}'
 
         device_dicts = [
             self._device_online_by_friendly_name,

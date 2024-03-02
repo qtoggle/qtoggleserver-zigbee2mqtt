@@ -164,6 +164,9 @@ class DevicePort(Zigbee2MQTTPort):
     def get_device_friendly_name(self) -> str:
         return self._device_friendly_name
 
+    def get_device_safe_friendly_name(self) -> str:
+        return self.get_peripheral().get_device_safe_friendly_name(self._device_friendly_name)
+
     def get_property_name(self) -> str:
         return self._property_name
 
@@ -207,7 +210,8 @@ class DeviceControlPort(DevicePort):
                 await port.save()
 
     async def attr_set_friendly_name(self, value: str) -> None:
-        current_device_friendly_name = self.get_device_friendly_name()
+        current_friendly_name = self.get_device_friendly_name()
+        current_safe_friendly_name = self.get_device_safe_friendly_name()
 
         if value:
             # Remember enabled ports before they are renamed (practically removed and re-added)
@@ -216,10 +220,10 @@ class DeviceControlPort(DevicePort):
             ]
             device_enabled_port_ids = []
             for port_id in all_enabled_port_ids:
-                if port_id == current_device_friendly_name:
+                if port_id == current_safe_friendly_name:
                     port_id = value
-                elif port_id.startswith(f'{current_device_friendly_name}.'):
-                    port_id = f'{value}.{port_id[len(current_device_friendly_name) + 1:]}'
+                elif port_id.startswith(f'{current_safe_friendly_name}.'):
+                    port_id = f'{value}.{port_id[len(current_safe_friendly_name) + 1:]}'
                 else:
                     continue
                 device_enabled_port_ids.append(port_id)
@@ -228,17 +232,17 @@ class DeviceControlPort(DevicePort):
             # `port-update` event for this port *before* it is removed.
 
             asyncio_utils.fire_and_forget(
-                asyncio_utils.await_later(1, self.get_peripheral().rename_device(current_device_friendly_name, value))
+                asyncio_utils.await_later(1, self.get_peripheral().rename_device(current_friendly_name, value))
             )
             asyncio_utils.fire_and_forget(
                 asyncio_utils.await_later(2, self.enable_renamed_ports(set(device_enabled_port_ids), value))
             )
-        else:
-            # Delay the actual renaming call a bit, so that this attribute setter completes and triggers the
+        else:  # empty `value` means removal
+            # Delay the actual removing call a bit, so that this attribute setter completes and triggers the
             # `port-update` event for this port *before* it is removed.
 
             asyncio_utils.fire_and_forget(
-                asyncio_utils.await_later(1, self.get_peripheral().remove_device(current_device_friendly_name))
+                asyncio_utils.await_later(1, self.get_peripheral().remove_device(current_friendly_name))
             )
 
     async def attr_get_friendly_name(self) -> str:
