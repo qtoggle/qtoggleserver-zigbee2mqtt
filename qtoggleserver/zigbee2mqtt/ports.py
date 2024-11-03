@@ -1,5 +1,6 @@
 import abc
 import asyncio
+import copy
 
 from typing import cast, Any, Optional
 
@@ -182,7 +183,7 @@ class DeviceControlPort(DevicePort):
         }
     }
 
-    STANDARD_ATTRDEFS = dict(DevicePort.STANDARD_ATTRDEFS)
+    STANDARD_ATTRDEFS = copy.deepcopy(DevicePort.STANDARD_ATTRDEFS)
     STANDARD_ATTRDEFS['display_name']['persisted'] = False
 
     PERSISTED = None
