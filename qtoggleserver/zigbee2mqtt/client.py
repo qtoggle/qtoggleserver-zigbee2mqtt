@@ -216,6 +216,8 @@ class Zigbee2MQTTClient(Peripheral):
             await self.handle_bridge_event_message(payload_json)
         elif subtopic == 'extensions':
             await self.handle_bridge_extensions_message(payload_json)
+        elif subtopic.startswith('definitions'):
+            pass  # Ignore clusters definitions
         elif subtopic.startswith('request/'):
             pass  # Ignore request messages (normally sent by ourselves)
         elif subtopic.startswith('response/'):
