@@ -468,7 +468,11 @@ class Zigbee2MQTTClient(Peripheral):
             for endpoint in self._endpoints_by_friendly_name.get(friendly_name, []):
                 value = state.get(f'{property_name}_{endpoint}')
                 if value is not None:
-                    return value
+                    break
+
+        if value is None and property_name == 'address':
+            device_info = self._device_info_by_friendly_name.get(friendly_name, {})
+            value = device_info.get('ieee_address')
 
         return value
 
@@ -718,6 +722,14 @@ class Zigbee2MQTTClient(Peripheral):
                     attrdef['choices'] = choices
 
                 control_port_args['additional_attrdefs'][name] = attrdef
+
+            # Add device address attrdef
+            control_port_args['additional_attrdefs']['address'] = {
+                'display_name': 'Address',
+                'type': 'string',
+                'modifiable': False,
+                'description': 'Zigbee IEEE Address',
+            }
 
             # Ensure port id prefix
             for pa in port_args_by_id.values():
