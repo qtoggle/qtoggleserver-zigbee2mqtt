@@ -34,10 +34,17 @@ class Zigbee2MQTTClient(Peripheral):
     }
     _REV_NAME_MAPPING = {v: k for k, v in _NAME_MAPPING.items()}
 
-    _TYPE_MAPPING = {
+    _PORT_TYPE_MAPPING = {
         'binary': core_ports.TYPE_BOOLEAN,
         'numeric': core_ports.TYPE_NUMBER,
         'enum': core_ports.TYPE_NUMBER,
+    }
+
+    _ATTR_TYPE_MAPPING = {
+        'binary': 'boolean',  # TODO: use constants once they are defined in core
+        'numeric': 'number',
+        'enum': 'number',
+        'text': 'string',
     }
 
     def __init__(
@@ -639,7 +646,7 @@ class Zigbee2MQTTClient(Peripheral):
                 features = exposed_info.get('features', [])
                 name = exposed_info.get('property') or exposed_info.get('name')
                 if name in force_port_properties:
-                    # If this exposed info has been forced as a port, consider it a feature itseld
+                    # If this exposed info has been forced as a port, consider it a feature itself
                     features.append(exposed_info)
                 if not features:
                     # Exposed info without features becomes attribute of control port
@@ -651,7 +658,7 @@ class Zigbee2MQTTClient(Peripheral):
                     if not name:
                         continue
                     name = self._NAME_MAPPING.get(name, name)
-                    type_ = self._TYPE_MAPPING.get(feature.get('type'))
+                    type_ = self._PORT_TYPE_MAPPING.get(feature.get('type'))
                     if not type_:
                         continue
                     if name in force_attribute_properties:
@@ -682,7 +689,7 @@ class Zigbee2MQTTClient(Peripheral):
                 if name in force_port_properties:
                     continue
 
-                type_ = self._TYPE_MAPPING.get(info['type'])
+                type_ = self._ATTR_TYPE_MAPPING.get(info['type'])
                 if not type_:
                     continue
 
