@@ -113,7 +113,7 @@ The following configuration options are available for a device:
 
 Some Zigbee devices won't allow obtaining the current state by doing a `get {"state": ""}`. Instead, they need one
 of the specific properties to be requested, such as `get {"temperature": ""}`. This option allows setting the name of
-this property. See 
+this property. If set to `null`, disables querying for state. See 
 [zigbee2mqtt/FRIENDLY_NAME/get](https://www.zigbee2mqtt.io/guide/usage/mqtt_topics_and_messages.html#zigbee2mqtt-friendly-name-get)
 for details.
 

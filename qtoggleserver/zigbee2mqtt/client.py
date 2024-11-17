@@ -415,10 +415,14 @@ class Zigbee2MQTTClient(Peripheral):
                 self._pending_requests.pop(transaction_id, None)
 
     async def query_device_state(self, friendly_name: str, properties: Optional[list[str]]) -> None:
-        self.debug('querying device "%s" state', friendly_name)
         config = self.get_device_config(friendly_name)
         topic = f'{self.mqtt_base_topic}/{friendly_name}/get'
-        payload_json = {config.get('get_state_property', 'state'): ''}
+        state_property = config.get('get_state_property', 'state')
+        if not state_property:
+            return  # state querying explicitly disabled
+
+        self.debug('querying device "%s" state', friendly_name)
+        payload_json = {state_property: ''}
         if properties:
             payload_json.update({p: '' for p in properties})
 
