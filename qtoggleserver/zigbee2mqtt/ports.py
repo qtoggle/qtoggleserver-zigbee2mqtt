@@ -266,8 +266,8 @@ class DeviceControlPort(DevicePort):
 
     async def handle_enable(self) -> None:
         await super().handle_enable()
-        self.get_peripheral().update_ports_from_device_info_asap()
+        self.get_peripheral().update_ports_from_device_info_asap(self)
 
     async def handle_disable(self) -> None:
         await super().handle_enable()
-        self.get_peripheral().update_ports_from_device_info_asap()
+        self.get_peripheral().update_ports_from_device_info_asap(self)

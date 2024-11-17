@@ -89,7 +89,7 @@ class Zigbee2MQTTClient(Peripheral):
         self._bridge_info: Optional[GenericJSONDict] = None
         self._pending_requests: dict[str, dict[str, Any]] = {}
         self._update_ports_from_device_info_task: Optional[asyncio.Task] = None
-        self._update_ports_from_device_info_scheduled: bool = False
+        self._update_ports_from_device_info_scheduled: set[Union[DevicePort, None]] = set()
 
         super().__init__(**kwargs)
 
@@ -534,17 +534,20 @@ class Zigbee2MQTTClient(Peripheral):
             }
         ]
 
-    def update_ports_from_device_info_asap(self) -> None:
-        self.debug('will update ports from device info asap')
-        self._update_ports_from_device_info_scheduled = True
+    def update_ports_from_device_info_asap(self, changed_port: Optional[DevicePort] = None) -> None:
+        if changed_port:
+            self.debug('will update ports from device info asap (changed port = %s)', changed_port)
+        else:
+            self.debug('will update ports from device info asap')
+        self._update_ports_from_device_info_scheduled.add(changed_port)
 
     async def _update_ports_from_device_info_loop(self) -> None:
         try:
             while True:
                 try:
                     if self._update_ports_from_device_info_scheduled:
-                        self._update_ports_from_device_info_scheduled = False
                         await self._update_ports_from_device_info()
+                        self._update_ports_from_device_info_scheduled.clear()
                 except Exception:
                     self.error('error while updating ports from device info', exc_info=True)
 
@@ -572,7 +575,11 @@ class Zigbee2MQTTClient(Peripheral):
                 await self.remove_port(existing_id)
 
         # Add all ports that don't yet exist on the server
-        changed_friendly_names = set()
+        changed_friendly_names = set(
+            p.get_device_friendly_name()
+            for p in self._update_ports_from_device_info_scheduled
+            if p
+        )
         for new_id, port_args in port_args_by_id.items():
             if new_id not in ports_by_id:
                 self.debug('new port %s detected', new_id)
