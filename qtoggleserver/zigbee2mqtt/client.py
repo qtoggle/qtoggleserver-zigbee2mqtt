@@ -550,8 +550,8 @@ class Zigbee2MQTTClient(Peripheral):
             while True:
                 try:
                     if self._update_ports_from_device_info_scheduled:
-                        await self._update_ports_from_device_info()
                         self._update_ports_from_device_info_scheduled.clear()
+                        await self._update_ports_from_device_info()
                 except Exception:
                     self.error('error while updating ports from device info', exc_info=True)
 
