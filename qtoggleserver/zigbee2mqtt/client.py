@@ -674,6 +674,7 @@ class Zigbee2MQTTClient(Peripheral):
                         continue
                     if name in force_attribute_properties:
                         force_attribute_features.append(feature)
+                        continue
 
                     port_args = {
                         'driver': DevicePort,
