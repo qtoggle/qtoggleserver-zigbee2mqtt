@@ -46,6 +46,7 @@ class DevicePort(Zigbee2MQTTPort):
         additional_attrdefs: Optional[AttributeDefinitions] = None,
         device_friendly_name: str,
         property_name: str,
+        property_group_name: str = None,
         value_on: Any = True,
         value_off: Any = False,
         values: Optional[list[str]] = None,
@@ -64,6 +65,7 @@ class DevicePort(Zigbee2MQTTPort):
         self._additional_attrdefs: AttributeDefinitions = additional_attrdefs or {}
         self._device_friendly_name: str = device_friendly_name
         self._property_name: str = property_name
+        self._property_group_name: Optional[str] = property_group_name
         self._value_on: Any = value_on
         self._value_off: Any = value_off
         self._values: Optional[list[str]] = values
@@ -82,52 +84,8 @@ class DevicePort(Zigbee2MQTTPort):
     async def get_additional_attrdefs(self) -> AttributeDefinitions:
         return self.ADDITIONAL_ATTRDEFS | self._additional_attrdefs
 
-    async def attr_get_value(self, name: str) -> Optional[Attribute]:
-        value = self.get_peripheral().get_device_property(self.get_device_friendly_name(), name)
-
-        attrdefs = await self.get_attrdefs()
-        attrdef = attrdefs.get(name)
-        if not attrdef:
-            return value
-        if value is None:
-            return None
-
-        if attrdef.get('type') == 'boolean':
-            value = (value == attrdef.get('_value_on', True))
-        elif attrdef.get('_values'):  # map Z2M value to choice
-            try:
-                value = attrdef['_values_dict'][value] + 1
-            except KeyError:
-                self.error('got an unexpected choice: %s', value)
-                value = None
-
-        return value
-
-    async def attr_set_value(self, name: str, value: Attribute) -> None:
-        attrdefs = await self.get_attrdefs()
-        attrdef = attrdefs.get(name)
-        if not attrdef:
-            return
-
-        if attrdef.get('type') == 'boolean':
-            if value:
-                value = attrdef.get('_value_on', True)
-            else:
-                value = attrdef.get('_value_off', False)
-        elif attrdef.get('_values'):  # map choice to Z2M value
-            try:
-                value = attrdef.get('_values', [])[value - 1]
-            except IndexError:
-                raise ValueError(f'Invalid choice: {value}')
-
-        await self.get_peripheral().set_device_property(
-            self.get_device_friendly_name(), name, value
-        )
-
     async def read_value(self) -> NullablePortValue:
-        value = self.get_peripheral().get_device_property(self.get_device_friendly_name(), self.get_property_name())
-        if value is None:
-            return None
+        value = self.get_property_value(self.get_property_name(), self._property_group_name)
 
         if await self.get_type() == core_ports.TYPE_BOOLEAN:
             value = (value == self._value_on)
@@ -152,14 +110,12 @@ class DevicePort(Zigbee2MQTTPort):
             except IndexError:
                 raise ValueError(f'Invalid choice: {value}')
 
-        await self.get_peripheral().set_device_property(
-            self.get_device_friendly_name(), self.get_property_name(), value
-        )
+        await self.set_property_value(self.get_property_name(), value, self._property_group_name)
 
     async def attr_is_online(self) -> bool:
         return (
-            self.get_peripheral().is_device_online(self._device_friendly_name) and
-            await super().attr_is_online()
+            self.get_peripheral().is_device_online(self._device_friendly_name)
+            and await super().attr_is_online()
         )
 
     def get_device_friendly_name(self) -> str:
@@ -170,6 +126,36 @@ class DevicePort(Zigbee2MQTTPort):
 
     def get_property_name(self) -> str:
         return self._property_name
+
+    def get_property_value(self, property_name: str, property_group_name: Optional[str] = None) -> Any:
+        # First look for a group value
+        group_value = None
+        if property_group_name:
+            group_value = self.get_peripheral().get_device_property(
+                self.get_device_friendly_name(), property_group_name
+            )
+            if not isinstance(group_value, dict):
+                group_value = None
+
+        value = None
+        if group_value:
+            value = group_value.get(property_name)
+
+        # Then look for a direct value
+        if value is None:
+            value = self.get_peripheral().get_device_property(self.get_device_friendly_name(), property_name)
+
+        return value
+
+    async def set_property_value(
+        self, property_name: str, value: Any, property_group_name: Optional[str] = None
+    ) -> None:
+        if property_group_name:
+            await self.get_peripheral().set_device_property(
+                self.get_device_friendly_name(), property_group_name, {property_name: value}
+            )
+        else:
+            await self.get_peripheral().set_device_property(self.get_device_friendly_name(), property_name, value)
 
 
 class DeviceControlPort(DevicePort):
@@ -254,6 +240,46 @@ class DeviceControlPort(DevicePort):
 
     async def attr_get_friendly_name(self) -> str:
         return self.get_device_friendly_name()
+
+    async def attr_get_value(self, name: str) -> Optional[Attribute]:
+        attrdefs = await self.get_attrdefs()
+        attrdef = attrdefs.get(name)
+        if not attrdef:
+            return None
+
+        value = self.get_property_value(name, attrdef.get('property_group_name'))
+        if value is None:
+            return None
+
+        if attrdef.get('type') == 'boolean':
+            value = (value == attrdef.get('_value_on', True))
+        elif attrdef.get('_values'):  # map Z2M value to choice
+            try:
+                value = attrdef['_values_dict'][value] + 1
+            except KeyError:
+                self.error('got an unexpected choice: %s', value)
+                value = None
+
+        return value
+
+    async def attr_set_value(self, name: str, value: Attribute) -> None:
+        attrdefs = await self.get_attrdefs()
+        attrdef = attrdefs.get(name)
+        if not attrdef:
+            return
+
+        if attrdef.get('type') == 'boolean':
+            if value:
+                value = attrdef.get('_value_on', True)
+            else:
+                value = attrdef.get('_value_off', False)
+        elif attrdef.get('_values'):  # map choice to Z2M value
+            try:
+                value = attrdef.get('_values', [])[value - 1]
+            except IndexError:
+                raise ValueError(f'Invalid choice: {value}')
+
+        await self.set_property_value(name, value, attrdef.get('property_group_name'))
 
     async def read_value(self) -> NullablePortValue:
         return self.get_peripheral().is_device_enabled(self.get_device_friendly_name())

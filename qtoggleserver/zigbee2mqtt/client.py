@@ -474,8 +474,8 @@ class Zigbee2MQTTClient(Peripheral):
         timestamp, state = timestamped_state
         value = state.get(property_name)
         if value is None:
-            # Try the variant where the property name is suffixed with one of the end points in the state dict,
-            # such as `power_on_behavior_l1`.
+            # Try the variant where the property name is suffixed with one of the endpoints in the state dict,
+            # such as `power_on_behavior_l1`, but the exposed property name is simply `power_on_behavior`.
             for endpoint in self._endpoints_by_friendly_name.get(friendly_name, []):
                 value = state.get(f'{property_name}_{endpoint}')
                 if value is not None:
@@ -655,8 +655,8 @@ class Zigbee2MQTTClient(Peripheral):
                     endpoints.add(exposed_info['endpoint'])
 
                 features = exposed_info.get('features', [])
-                name = exposed_info.get('property') or exposed_info.get('name')
-                if name in force_port_properties:
+                exposed_name = exposed_info.get('property') or exposed_info.get('name')
+                if exposed_name in force_port_properties:
                     # If this exposed info has been forced as a port, consider it a feature itself
                     features.append(exposed_info)
                 if not features:
@@ -673,6 +673,7 @@ class Zigbee2MQTTClient(Peripheral):
                     if not type_:
                         continue
                     if name in force_attribute_properties:
+                        feature['exposed_name'] = exposed_name
                         force_attribute_features.append(feature)
                         continue
 
@@ -688,6 +689,7 @@ class Zigbee2MQTTClient(Peripheral):
                         'additional_attrdefs': {},
                         'device_friendly_name': friendly_name,
                         'property_name': name,
+                        'property_group_name': exposed_name,
                         'value_on': feature.get('value_on', True),
                         'value_off': feature.get('value_off', False),
                         'values': feature.get('values')
@@ -696,7 +698,7 @@ class Zigbee2MQTTClient(Peripheral):
 
             # Build additional attribute definitions from options and exposed non-features
             for info in exposed_non_features + force_attribute_features:
-                name = info['name']
+                name = info.get('property') or info.get('name')
                 name = self._NAME_MAPPING.get(name, name)
                 if name in force_port_properties:
                     continue
@@ -723,6 +725,7 @@ class Zigbee2MQTTClient(Peripheral):
                     'type': type_,
                     'modifiable': bool(info.get('access', 0) & 2),
                     'persisted': False,
+                    'property_group_name': info.get('exposed_name'),
                 }
                 if info.get('description'):
                     attrdef['description'] = info['description']
