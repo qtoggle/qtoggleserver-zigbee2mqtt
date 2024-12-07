@@ -742,14 +742,6 @@ class Zigbee2MQTTClient(Peripheral):
 
                 control_port_args['additional_attrdefs'][name] = attrdef
 
-            # Add device address attrdef
-            control_port_args['additional_attrdefs']['address'] = {
-                'display_name': 'Address',
-                'type': 'string',
-                'modifiable': False,
-                'description': 'Zigbee IEEE Address',
-            }
-
             # Ensure port id prefix
             for pa in port_args_by_id.values():
                 pa['id'] = f'{safe_friendly_name}.{pa["id"]}'

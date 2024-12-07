@@ -180,6 +180,12 @@ class DeviceControlPort(DevicePort):
             'type': 'string',
             'modifiable': True,
             'persisted': False,
+        },
+        'address': {
+            'display_name': 'Address',
+            'description': 'Zigbee IEEE Address',
+            'type': 'string',
+            'modifiable': False,
         }
     }
 
