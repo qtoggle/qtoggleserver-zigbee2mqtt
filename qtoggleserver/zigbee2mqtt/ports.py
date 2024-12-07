@@ -114,8 +114,8 @@ class DevicePort(Zigbee2MQTTPort):
 
     async def attr_is_online(self) -> bool:
         return (
-            self.get_peripheral().is_device_online(self._device_friendly_name)
-            and await super().attr_is_online()
+            self.get_peripheral().is_device_online(self._device_friendly_name) and
+            await super().attr_is_online()
         )
 
     def get_device_friendly_name(self) -> str:
