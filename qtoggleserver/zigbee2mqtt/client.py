@@ -619,6 +619,7 @@ class Zigbee2MQTTClient(Peripheral):
                 continue
 
             friendly_name = device_info['friendly_name']
+            definition = device_info['definition']
 
             # Ensure we have a device friendly name that's safe for being used as a port id.
             safe_friendly_name = friendly_name
@@ -650,7 +651,7 @@ class Zigbee2MQTTClient(Peripheral):
             # Build ports from features
             exposed_non_features = []
             force_attribute_features = []
-            for exposed_info in device_info['definition'].get('exposes', []):
+            for exposed_info in definition.get('exposes', []):
                 if 'endpoint' in exposed_info:
                     endpoints.add(exposed_info['endpoint'])
 
@@ -697,7 +698,8 @@ class Zigbee2MQTTClient(Peripheral):
                     port_args_by_id[port_args['id']] = port_args
 
             # Build additional attribute definitions from options and exposed non-features
-            for info in exposed_non_features + force_attribute_features:
+            options = definition.get('options', [])
+            for info in options + exposed_non_features + force_attribute_features:
                 name = info.get('property') or info.get('name')
                 name = self._NAME_MAPPING.get(name, name)
                 if name in force_port_properties:
