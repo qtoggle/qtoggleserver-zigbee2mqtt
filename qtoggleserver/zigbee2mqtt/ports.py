@@ -17,6 +17,70 @@ class Zigbee2MQTTPort(PeripheralPort, metaclass=abc.ABCMeta):
         return cast(Zigbee2MQTTClient, super().get_peripheral())
 
 
+class BaseDevicePort(Zigbee2MQTTPort, metaclass=abc.ABCMeta):
+    def __init__(self, *, device_friendly_name: str, **kwargs) -> None:
+        self._device_friendly_name = device_friendly_name
+
+        super().__init__(**kwargs)
+
+    def get_peripheral(self) -> Zigbee2MQTTClient:
+        return cast(Zigbee2MQTTClient, super().get_peripheral())
+
+    async def attr_is_online(self) -> bool:
+        return (
+            await super().attr_is_online() and
+            self.get_peripheral().is_device_online(self.get_device_friendly_name())
+        )
+
+    def get_device_friendly_name(self) -> str:
+        return self._device_friendly_name
+
+    def get_device_safe_friendly_name(self) -> str:
+        return self.get_peripheral().get_device_safe_friendly_name(self._device_friendly_name)
+
+    def get_state_property(self, property_path: list[str]) -> Any:
+        assert len(property_path) > 0
+
+        value = self.get_peripheral().get_device_state(self.get_device_friendly_name()) or {}
+        for property_name in property_path:
+            value = value.get(property_name)
+            if value is None:
+                return None
+
+        return value
+
+    async def set_state_property(self, property_path: list[str], value: Any) -> None:
+        assert len(property_path) > 0
+
+        for property_name in reversed(property_path):
+            value = {
+                property_name: value
+            }
+
+        await self.get_peripheral().set_device_state(self.get_device_friendly_name(), value)
+
+    def get_config_property(self, property_path: list[str]) -> Any:
+        assert len(property_path) > 0
+
+        value = self.get_peripheral().get_device_config(self.get_device_friendly_name()) or {}
+        for property_name in property_path:
+            value = value.get(property_name)
+            if value is None:
+                return None
+
+        return value
+
+    async def set_config_property(self, property_path: list[str], value: Any) -> None:
+        assert len(property_path) > 0
+
+        for property_name in reversed(property_path):
+            value = {
+                property_name: value
+            }
+
+        await self.get_peripheral().set_device_config(self.get_device_friendly_name(), value)
+
+
 class PermitJoinPort(Zigbee2MQTTPort):
     ID = 'permit_join'
     TYPE = core_ports.TYPE_BOOLEAN
@@ -32,7 +96,7 @@ class PermitJoinPort(Zigbee2MQTTPort):
         await self.get_peripheral().set_permit_join(value)
 
 
-class DevicePort(Zigbee2MQTTPort):
+class DevicePort(BaseDevicePort):
     def __init__(
         self,
         *,
@@ -43,16 +107,15 @@ class DevicePort(Zigbee2MQTTPort):
         unit: Optional[str] = None,
         min: Optional[float] = None,
         max: Optional[float] = None,
-        additional_attrdefs: Optional[AttributeDefinitions] = None,  # TODO:
-        property_path: Optional[list[str]] = None,  # TODO: should not be optional!
-        storage: Optional[str] = None,  # TODO: should not be optional!
+        property_path: list[str],
+        storage: str,
         device_friendly_name: str,
         value_on: Any = True,
         value_off: Any = False,
         values: Optional[list[str]] = None,
         **kwargs,
     ) -> None:
-        super().__init__(id=id, **kwargs)
+        super().__init__(id=id, device_friendly_name=device_friendly_name, **kwargs)
 
         # Following properties will dictate the initial value of their corresponding port attributes
         self._display_name: str = display_name
@@ -62,9 +125,7 @@ class DevicePort(Zigbee2MQTTPort):
         self._min: Optional[float] = min
         self._max: Optional[float] = max
 
-        self._additional_attrdefs: AttributeDefinitions = additional_attrdefs or {}
-        self._device_friendly_name: str = device_friendly_name
-        self._property_path: list[str] = property_path or []
+        self._property_path: list[str] = property_path
         self._storage: str = storage
         self._value_on: Any = value_on
         self._value_off: Any = value_off
@@ -80,9 +141,6 @@ class DevicePort(Zigbee2MQTTPort):
                 for i, v in enumerate(values)
             ]
             self._values_dict: dict[str, int] = {v: i for i, v in enumerate(values)}
-
-    async def get_additional_attrdefs(self) -> AttributeDefinitions:
-        return self.ADDITIONAL_ATTRDEFS | self._additional_attrdefs
 
     async def read_value(self) -> NullablePortValue:
         if self._storage == 'state':
@@ -118,67 +176,11 @@ class DevicePort(Zigbee2MQTTPort):
         else:
             await self.set_config_property(self.get_property_path(), value)
 
-    async def attr_is_online(self) -> bool:
-        return (
-            self.get_peripheral().is_device_online(self._device_friendly_name) and
-            await super().attr_is_online()
-        )
-
-    def get_device_friendly_name(self) -> str:
-        return self._device_friendly_name
-
-    def get_device_safe_friendly_name(self) -> str:
-        return self.get_peripheral().get_device_safe_friendly_name(self._device_friendly_name)
-
     def get_property_path(self) -> list[str]:
         return self._property_path
 
-    def get_state_property(self, property_path: list[str]) -> Any:
-        assert len(property_path) > 0
 
-        value = self.get_peripheral().get_device_state(self.get_device_friendly_name()) or {}
-        for property_name in property_path:
-            value = value.get(property_name)
-            if value is None:
-                return None
-
-        return value
-
-    async def set_state_property(self, property_path: list[str], value: Any) -> None:
-        assert len(property_path) > 0
-
-        for property_name in reversed(property_path):
-            value = {
-                property_name: value
-            }
-
-        await self.get_peripheral().set_device_state(self.get_device_friendly_name(), value)
-
-    # TODO check if port-update triggered on config property change
-
-    def get_config_property(self, property_path: list[str]) -> Any:
-        assert len(property_path) > 0
-
-        value = self.get_peripheral().get_device_config(self.get_device_friendly_name()) or {}
-        for property_name in property_path:
-            value = value.get(property_name)
-            if value is None:
-                return None
-
-        return value
-
-    async def set_config_property(self, property_path: list[str], value: Any) -> None:
-        assert len(property_path) > 0
-
-        for property_name in reversed(property_path):
-            value = {
-                property_name: value
-            }
-
-        await self.get_peripheral().set_device_config(self.get_device_friendly_name(), value)
-
-
-class DeviceControlPort(DevicePort):  # TODO: this is not a DevicePort!
+class DeviceControlPort(BaseDevicePort):
     ADDITIONAL_ATTRDEFS = {
         'friendly_name': {
             'display_name': 'Friendly Name',
@@ -197,17 +199,39 @@ class DeviceControlPort(DevicePort):  # TODO: this is not a DevicePort!
         }
     }
 
+    # Force `display_name` not persisted (by qToggleServer) as it's actually persisted by Z2M
     STANDARD_ATTRDEFS = copy.deepcopy(DevicePort.STANDARD_ATTRDEFS)
     STANDARD_ATTRDEFS['display_name']['persisted'] = False
 
+    TYPE = core_ports.TYPE_BOOLEAN
+    WRITABLE = True
     PERSISTED = None
 
     _MAX_RENAME_ATTEMPTS = 10
 
+    def __init__(
+        self,
+        *,
+        id: str,
+        additional_attrdefs: Optional[AttributeDefinitions],
+        device_friendly_name: str,
+        **kwargs,
+    ) -> None:
+        super().__init__(id=id, device_friendly_name=device_friendly_name, **kwargs)
+
+        self._additional_attrdefs: AttributeDefinitions = additional_attrdefs or {}
+
+    async def get_additional_attrdefs(self) -> AttributeDefinitions:
+        return self.ADDITIONAL_ATTRDEFS | self._additional_attrdefs
+
     async def enable_renamed_ports(self, enabled_port_ids: set[str], new_friendly_name: str, attempt: int = 1) -> None:
         self.debug('enabling renamed ports: %s (attempt %d)', ', '.join(enabled_port_ids), attempt)
 
-        ports = self.get_peripheral().get_device_ports(new_friendly_name)
+        ports: list[BaseDevicePort] = self.get_peripheral().get_device_ports(new_friendly_name)
+        control_port = self.get_peripheral().get_control_port(new_friendly_name)
+        if control_port:
+            ports.append(control_port)
+
         if not ports:
             if attempt < self._MAX_RENAME_ATTEMPTS:
                 self.debug('renamed ports not added yet, retrying later')
@@ -224,14 +248,19 @@ class DeviceControlPort(DevicePort):  # TODO: this is not a DevicePort!
                 await port.trigger_update()
                 await port.save()
 
+    async def attr_get_friendly_name(self) -> str:
+        return self._device_friendly_name
+
     async def attr_set_friendly_name(self, value: str) -> None:
-        current_friendly_name = self.get_device_friendly_name()
-        current_safe_friendly_name = self.get_device_safe_friendly_name()
+        current_friendly_name = self._device_friendly_name
+        current_safe_friendly_name = self.get_peripheral().get_device_safe_friendly_name(self._device_friendly_name)
 
         if value:
             # Remember enabled ports before they are renamed (practically removed and re-added)
             all_enabled_port_ids = [
-                p.get_initial_id() for p in self.get_peripheral().get_device_ports() if p.is_enabled()
+                p.get_initial_id()
+                for p in self.get_peripheral().get_device_ports() + self.get_peripheral().get_control_ports()
+                if p.is_enabled()
             ]
             device_enabled_port_ids = []
             for port_id in all_enabled_port_ids:
@@ -259,9 +288,6 @@ class DeviceControlPort(DevicePort):  # TODO: this is not a DevicePort!
             asyncio_utils.fire_and_forget(
                 asyncio_utils.await_later(1, self.get_peripheral().remove_device(current_friendly_name))
             )
-
-    async def attr_get_friendly_name(self) -> str:
-        return self.get_device_friendly_name()
 
     async def attr_get_value(self, name: str) -> Optional[Attribute]:
         attrdefs = await self.get_additional_attrdefs()
@@ -337,17 +363,24 @@ class DeviceControlPort(DevicePort):  # TODO: this is not a DevicePort!
         await self.get_peripheral().set_device_enabled(self.get_device_friendly_name(), value)
 
     async def attr_get_display_name(self) -> str:
-        config = self.get_peripheral().get_device_config(self.get_device_friendly_name())
+        config_description = self.get_config_property(['description'])
+        if config_description is not None:
+            return config_description
+
         info = self.get_peripheral().get_device_info(self.get_device_friendly_name()) or {}
-        return config.get('description', info.get('definition', {}).get('description', ''))
+        info_description = info.get('definition', {}).get('description')
+        if info_description is not None:
+            return info_description
+
+        return ''
 
     async def attr_set_display_name(self, value: str) -> None:
-        await self.get_peripheral().set_device_config(self.get_device_friendly_name(), {'description': value})
+        await self.set_config_property(['description'], value)
 
     async def handle_enable(self) -> None:
         await super().handle_enable()
-        self.get_peripheral().update_ports_from_device_info_asap(self)
+        self.get_peripheral().update_ports_from_device_info_asap(self.get_device_friendly_name())
 
     async def handle_disable(self) -> None:
         await super().handle_enable()
-        self.get_peripheral().update_ports_from_device_info_asap(self)
+        self.get_peripheral().update_ports_from_device_info_asap(self.get_device_friendly_name())

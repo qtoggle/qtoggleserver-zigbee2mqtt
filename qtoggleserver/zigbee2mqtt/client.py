@@ -94,7 +94,7 @@ class Zigbee2MQTTClient(Peripheral):
         self._bridge_info: Optional[GenericJSONDict] = None
         self._pending_requests: dict[str, dict[str, Any]] = {}
         self._update_ports_from_device_info_task: Optional[asyncio.Task] = None
-        self._update_ports_from_device_info_scheduled: set[Union[DevicePort, None]] = set()
+        self._update_ports_from_device_info_scheduled: set[Union[str, None]] = set()
 
         super().__init__(**kwargs)
 
@@ -513,20 +513,21 @@ class Zigbee2MQTTClient(Peripheral):
             }
         ]
 
-    def update_ports_from_device_info_asap(self, changed_port: Optional[DevicePort] = None) -> None:
-        if changed_port:
-            self.debug('will update ports from device info asap (changed port = %s)', changed_port)
+    def update_ports_from_device_info_asap(self, changed_friendly_name: Optional[str] = None) -> None:
+        if changed_friendly_name:
+            self.debug('will update ports from device info asap (changed friendly name = "%s")', changed_friendly_name)
         else:
             self.debug('will update ports from device info asap')
-        self._update_ports_from_device_info_scheduled.add(changed_port)
+        self._update_ports_from_device_info_scheduled.add(changed_friendly_name)
 
     async def _update_ports_from_device_info_loop(self) -> None:
         try:
             while True:
                 try:
                     if self._update_ports_from_device_info_scheduled:
+                        changed_friendly_names = set(n for n in self._update_ports_from_device_info_scheduled if n)
                         self._update_ports_from_device_info_scheduled.clear()
-                        await self._update_ports_from_device_info()
+                        await self._update_ports_from_device_info(changed_friendly_names)
                 except Exception:
                     self.error('error while updating ports from device info', exc_info=True)
 
@@ -534,10 +535,10 @@ class Zigbee2MQTTClient(Peripheral):
         except asyncio.CancelledError:
             self.debug('updating ports from device info task cancelled', exc_info=True)
 
-    async def _update_ports_from_device_info(self) -> None:
+    async def _update_ports_from_device_info(self, changed_friendly_names: set[str]) -> None:
         self.debug('updating ports from device info')
         port_args_list = self._port_args_from_device_info(self._device_info_by_friendly_name)
-        ports_by_id = {p.get_initial_id(): p for p in self.get_device_ports()}
+        ports_by_id = {p.get_initial_id(): p for p in self.get_device_ports() + self.get_control_ports()}
         port_args_by_id = {
             pa['id']: pa
             for pa in port_args_list
@@ -554,11 +555,7 @@ class Zigbee2MQTTClient(Peripheral):
                 await self.remove_port(existing_id)
 
         # Add all ports that don't yet exist on the server
-        changed_friendly_names = set(
-            p.get_device_friendly_name()
-            for p in self._update_ports_from_device_info_scheduled
-            if p
-        )
+        changed_friendly_names = set(changed_friendly_names)
         for new_id, port_args in port_args_by_id.items():
             if new_id not in ports_by_id:
                 self.debug('new port %s detected', new_id)
@@ -661,8 +658,6 @@ class Zigbee2MQTTClient(Peripheral):
         control_port_args = {
             'driver': DeviceControlPort,
             'id': safe_friendly_name,
-            'type': core_ports.TYPE_BOOLEAN,
-            'writable': True,
             'device_friendly_name': friendly_name,
             'additional_attrdefs': {},
         }
@@ -674,9 +669,9 @@ class Zigbee2MQTTClient(Peripheral):
         for exposed_item in exposed_items:
             path_str = '.'.join(exposed_item['path'])
             is_attrdef = (
-                exposed_item.get('category') in ('config', 'diagnostic')
-                or exposed_item.get('type') == 'text'
-                or exposed_item.get('storage') == 'config'
+                exposed_item.get('category') in ('config', 'diagnostic') or
+                exposed_item.get('type') == 'text' or
+                exposed_item.get('storage') == 'config'
             )
 
             if is_attrdef and any(fnmatch(path_str, pat) for pat in force_port_properties):
@@ -744,7 +739,6 @@ class Zigbee2MQTTClient(Peripheral):
                     'unit': exposed_item.get('unit'),
                     'min': exposed_item.get('value_min'),
                     'max': exposed_item.get('value_max'),
-                    'additional_attrdefs': {},
                     'device_friendly_name': friendly_name,
                     'property_path': exposed_item['path'],
                     'storage': exposed_item['storage'],
@@ -761,46 +755,55 @@ class Zigbee2MQTTClient(Peripheral):
         return [control_port_args] + list(port_args_by_id.values())
 
     def get_device_ports(self, friendly_name: Optional[str] = None) -> list[DevicePort]:
+        device_ports = [p for p in self.get_ports() if isinstance(p, DevicePort)]
         if friendly_name:
-            return [
-                p for p in self.get_ports()
-                if isinstance(p, DevicePort) and (
-                    p.get_initial_id().startswith(f'{friendly_name}.') or
-                    p.get_initial_id() == friendly_name
-                )
+            device_ports = [
+                p
+                for p in device_ports
+                if p.get_initial_id().startswith(f'{friendly_name}.') or p.get_initial_id() == friendly_name
             ]
-        else:
-            return [p for p in self.get_ports() if isinstance(p, DevicePort)]
+
+        return device_ports
+
+    def get_control_ports(self) -> list[DeviceControlPort]:
+        return [p for p in self.get_ports() if isinstance(p, DeviceControlPort)]
+
+    def get_control_port(self, friendly_name: str) -> Optional[DeviceControlPort]:
+        safe_friendly_name = self.get_device_safe_friendly_name(friendly_name)
+        return self.get_port(safe_friendly_name)
 
     async def _maybe_trigger_port_update(self, friendly_name: str, old_properties: dict, new_properties: dict) -> None:
+        control_port = self.get_control_port(friendly_name)
+        if not control_port:
+            return
+
         # Gather all properties that have just changed
         changed_properties = (
-            set(k for k, v in new_properties.items() if v != old_properties.get(k))
-            | set(k for k, v in old_properties.items() if v != new_properties.get(k))
+            set(k for k, v in new_properties.items() if v != old_properties.get(k)) |
+            set(k for k, v in old_properties.items() if v != new_properties.get(k))
         )
 
         # Gather all properties that represent port values
         device_ports = self.get_device_ports(friendly_name)
         value_properties = set()
         for port in device_ports:
-            if not isinstance(port, DeviceControlPort):
-                value_properties.add(port.get_property_path()[0])
+            value_properties.add(port.get_property_path()[0])
 
         # If only port value properties have changed, don't trigger unnecessary `port-update` events
         only_value_properties_changed = not (changed_properties - value_properties)
         if only_value_properties_changed:
             return
 
-        # Trigger `port-update` on all affected ports
-        for port in device_ports:
-            attrdefs = await port.get_additional_attrdefs()
-            attr_properties = set(a['property_path'][0] for a in attrdefs.values() if a.get('property_path'))
-            if not (attr_properties & changed_properties):
-                continue
-            port.invalidate_attrs()
-            if port.is_enabled():
-                await port.trigger_update()
-                port.save_asap()
+        attrdefs = await control_port.get_additional_attrdefs()
+        attr_properties = set(a['property_path'][0] for a in attrdefs.values() if a.get('property_path'))
+        if not (attr_properties & changed_properties):
+            return
+
+        # Trigger `port-update` on affected control port
+        control_port.invalidate_attrs()
+        if control_port.is_enabled():
+            await control_port.trigger_update()
+            control_port.save_asap()
 
 
 from .ports import PermitJoinPort, DeviceControlPort, DevicePort  # noqa: E402
