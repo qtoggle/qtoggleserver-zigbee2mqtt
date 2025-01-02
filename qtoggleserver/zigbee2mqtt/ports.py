@@ -44,9 +44,8 @@ class DevicePort(Zigbee2MQTTPort):
         min: Optional[float] = None,
         max: Optional[float] = None,
         additional_attrdefs: Optional[AttributeDefinitions] = None,
+        property_path: Optional[list[str]] = None,
         device_friendly_name: str,
-        property_name: str,
-        property_group_name: str = None,
         value_on: Any = True,
         value_off: Any = False,
         values: Optional[list[str]] = None,
@@ -64,8 +63,7 @@ class DevicePort(Zigbee2MQTTPort):
 
         self._additional_attrdefs: AttributeDefinitions = additional_attrdefs or {}
         self._device_friendly_name: str = device_friendly_name
-        self._property_name: str = property_name
-        self._property_group_name: Optional[str] = property_group_name
+        self._property_path: list[str] = property_path or []
         self._value_on: Any = value_on
         self._value_off: Any = value_off
         self._values: Optional[list[str]] = values
@@ -85,7 +83,7 @@ class DevicePort(Zigbee2MQTTPort):
         return self.ADDITIONAL_ATTRDEFS | self._additional_attrdefs
 
     async def read_value(self) -> NullablePortValue:
-        value = self.get_property_value(self.get_property_name(), self._property_group_name)
+        value = self.get_property_value(self.get_property_path())
 
         if await self.get_type() == core_ports.TYPE_BOOLEAN:
             value = (value == self._value_on)
@@ -110,7 +108,7 @@ class DevicePort(Zigbee2MQTTPort):
             except IndexError:
                 raise ValueError(f'Invalid choice: {value}')
 
-        await self.set_property_value(self.get_property_name(), value, self._property_group_name)
+        await self.set_property_value(self.get_property_path(), value)
 
     async def attr_is_online(self) -> bool:
         return (
@@ -124,38 +122,29 @@ class DevicePort(Zigbee2MQTTPort):
     def get_device_safe_friendly_name(self) -> str:
         return self.get_peripheral().get_device_safe_friendly_name(self._device_friendly_name)
 
-    def get_property_name(self) -> str:
-        return self._property_name
+    def get_property_path(self) -> list[str]:
+        return self._property_path
 
-    def get_property_value(self, property_name: str, property_group_name: Optional[str] = None) -> Any:
-        # First look for a group value
-        group_value = None
-        if property_group_name:
-            group_value = self.get_peripheral().get_device_property(
-                self.get_device_friendly_name(), property_group_name
-            )
-            if not isinstance(group_value, dict):
-                group_value = None
+    def get_property_value(self, property_path: list[str]) -> Any:
+        assert len(property_path) > 0
 
-        value = None
-        if group_value:
-            value = group_value.get(property_name)
-
-        # Then look for a direct value
-        if value is None:
-            value = self.get_peripheral().get_device_property(self.get_device_friendly_name(), property_name)
+        value = self.get_peripheral().get_device_property(self.get_device_friendly_name(), property_path[0])
+        for property_name in property_path[1:]:
+            value = value.get(property_name)
+            if value is None:
+                return None
 
         return value
 
-    async def set_property_value(
-        self, property_name: str, value: Any, property_group_name: Optional[str] = None
-    ) -> None:
-        if property_group_name:
-            await self.get_peripheral().set_device_property(
-                self.get_device_friendly_name(), property_group_name, {property_name: value}
-            )
-        else:
-            await self.get_peripheral().set_device_property(self.get_device_friendly_name(), property_name, value)
+    async def set_property_value(self, property_path: list[str], value: Any) -> None:
+        assert len(property_path) > 0
+
+        for property_name in property_path[1:]:
+            value = {
+                property_name: value
+            }
+
+        await self.get_peripheral().set_device_property(self.get_device_friendly_name(), property_path[0], value)
 
 
 class DeviceControlPort(DevicePort):
@@ -170,7 +159,7 @@ class DeviceControlPort(DevicePort):
         'address': {
             'display_name': 'Address',
             'description': 'Zigbee IEEE Address',
-            'type': 'string',
+            'ttype': 'string',
             'modifiable': False,
         }
     }
@@ -247,7 +236,11 @@ class DeviceControlPort(DevicePort):
         if not attrdef:
             return None
 
-        value = self.get_property_value(name, attrdef.get('property_group_name'))
+        property_path = attrdef.get('property_path')
+        if not property_path:
+            return None
+
+        value = self.get_property_value(property_path)
         if value is None:
             return None
 
@@ -279,7 +272,7 @@ class DeviceControlPort(DevicePort):
             except IndexError:
                 raise ValueError(f'Invalid choice: {value}')
 
-        await self.set_property_value(name, value, attrdef.get('property_group_name'))
+        await self.set_property_value(attrdef['property_path'], value)
 
     async def read_value(self) -> NullablePortValue:
         return self.get_peripheral().is_device_enabled(self.get_device_friendly_name())

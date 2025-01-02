@@ -29,10 +29,14 @@ class Zigbee2MQTTClient(Peripheral):
     _MAX_OUTGOING_QUEUE_SIZE = 256
 
     # Used to adjust names of ports and attributes
-    _NAME_MAPPING = {
+    _PROPERTY_MAPPING = {
         'linkquality': 'link_quality',
     }
-    _REV_NAME_MAPPING = {v: k for k, v in _NAME_MAPPING.items()}
+    _REV_PROPERTY_MAPPING = {v: k for k, v in _PROPERTY_MAPPING.items()}
+
+    _LABEL_MAPPING = {
+        'Linkquality': 'Link Quality',
+    }
 
     _PORT_TYPE_MAPPING = {
         'binary': core_ports.TYPE_BOOLEAN,
@@ -84,7 +88,6 @@ class Zigbee2MQTTClient(Peripheral):
         self._device_state_by_friendly_name: dict[str, tuple[int, GenericJSONDict]] = {}
         self._device_online_by_friendly_name: dict[str, bool] = {}
         self._device_config_by_friendly_name: dict[str, GenericJSONDict] = {}
-        self._endpoints_by_friendly_name: dict[str, set] = {}  # used as a hack to get some property states
         self._safe_friendly_name_dict: dict[str, str] = {}
         self._bridge_info: Optional[GenericJSONDict] = None
         self._pending_requests: dict[str, dict[str, Any]] = {}
@@ -348,7 +351,7 @@ class Zigbee2MQTTClient(Peripheral):
         self.debug('got device "%s" state: "%s"', friendly_name, json_utils.dumps(payload_json))
         processed_payload_json = {}
         for n, v in payload_json.items():
-            n = self._NAME_MAPPING.get(n, n)
+            n = self._PROPERTY_MAPPING.get(n, n)
             processed_payload_json[n] = v
 
         _, state = self._device_state_by_friendly_name.get(friendly_name, (0, {}))
@@ -362,7 +365,7 @@ class Zigbee2MQTTClient(Peripheral):
         value_properties = set()
         for port in device_ports:
             if not isinstance(port, DeviceControlPort):
-                value_properties.add(port.get_property_name())
+                value_properties.add(port.get_property_path()[0])
 
         # Gather all properties that have just changed
         changed_properties = (
@@ -431,7 +434,7 @@ class Zigbee2MQTTClient(Peripheral):
     async def set_device_property(self, friendly_name: str, property_name: str, value: Any) -> None:
         self.debug('setting device "%s" property "%s" to %s', friendly_name, property_name, json_utils.dumps(value))
         topic = f'{self.mqtt_base_topic}/{friendly_name}/set'
-        property_name = self._REV_NAME_MAPPING.get(property_name, property_name)
+        property_name = self._REV_PROPERTY_MAPPING.get(property_name, property_name)
         payload_json = {property_name: value}
         await self.publish_mqtt_message(topic, payload_json)
 
@@ -473,13 +476,6 @@ class Zigbee2MQTTClient(Peripheral):
 
         timestamp, state = timestamped_state
         value = state.get(property_name)
-        if value is None:
-            # Try the variant where the property name is suffixed with one of the endpoints in the state dict,
-            # such as `power_on_behavior_l1`, but the exposed property name is simply `power_on_behavior`.
-            for endpoint in self._endpoints_by_friendly_name.get(friendly_name, []):
-                value = state.get(f'{property_name}_{endpoint}')
-                if value is not None:
-                    break
 
         if value is None and property_name == 'address':
             device_info = self._device_info_by_friendly_name.get(friendly_name, {})
@@ -599,13 +595,49 @@ class Zigbee2MQTTClient(Peripheral):
                 if not self.is_control_port_enabled(friendly_name):
                     continue
                 pal = port_args_list_by_friendly_name.get(friendly_name, [])
-                properties = set()
+                property_names = set()
                 for port_args in pal:
                     attrdefs = port_args.get('additional_attrdefs', {})
-                    properties = properties.union(self._REV_NAME_MAPPING.get(a, a) for a in attrdefs)
+                    property_names = property_names.union(self._REV_PROPERTY_MAPPING.get(a, a) for a in attrdefs)
                     if port_args.get('property_name'):
-                        properties.add(port_args['property_name'])
-                await self.query_device_state(friendly_name, list(properties))
+                        property_names.add(port_args['property_name'])
+                await self.query_device_state(friendly_name, list(property_names))
+
+    def _parse_device_definition_rec(self, exposed_item: dict[str, Any], path: list[str]) -> list[dict[str, Any]]:
+        if exposed_item.get('type') == 'composite':
+            return [
+                result
+                for feature in exposed_item.get('features', [])
+                for result in self._parse_device_definition_rec(feature, path + [exposed_item['property']])
+            ]
+        elif 'features' in exposed_item:
+            return [
+                result
+                for feature in exposed_item.get('features', [])
+                for result in self._parse_device_definition_rec(feature, path)
+            ]
+        elif 'access' in exposed_item:
+            exposed_item['property'] = (
+                self._PROPERTY_MAPPING.get(exposed_item.get('property'), exposed_item.get('property'))
+            )
+            exposed_item['label'] = (
+                self._LABEL_MAPPING.get(exposed_item.get('label'), exposed_item.get('label'))
+            )
+
+            return [exposed_item | {'path': path + [exposed_item['property']]}]
+        else:
+            return []
+
+    def _parse_device_definition(self, definition: dict[str, Any]) -> list[dict[str, Any]]:
+        return [
+            result
+            for option in definition.get('options', [])
+            for result in self._parse_device_definition_rec(option, [])
+        ] + [
+            result
+            for exposed in definition.get('exposes', [])
+            for result in self._parse_device_definition_rec(exposed, [])
+        ]
 
     def _port_args_from_device_info(
         self,
@@ -621,96 +653,59 @@ class Zigbee2MQTTClient(Peripheral):
             friendly_name = device_info['friendly_name']
             definition = device_info['definition']
 
-            # Ensure we have a device friendly name that's safe for being used as a port id.
-            safe_friendly_name = friendly_name
-            if re.match(r'^0x[a-f0-9]{16}$', safe_friendly_name):
-                safe_friendly_name = f'device_{safe_friendly_name[2:]}'
-            self._safe_friendly_name_dict[friendly_name] = safe_friendly_name
+            all_port_args_list += self._port_args_from_device_definition(friendly_name, definition)
 
-            endpoints = self._endpoints_by_friendly_name[friendly_name] = set()
+        return all_port_args_list
 
-            device_config = self.get_device_config(friendly_name)
-            force_attribute_properties = device_config.get('force_attribute_properties', set())
-            force_port_properties = device_config.get('force_port_properties', set())
+    def _port_args_from_device_definition(self, friendly_name: str, definition: dict) -> list[dict[str, Any]]:
+        # Ensure we have a device friendly name that's safe for being used as a port id.
+        safe_friendly_name = friendly_name
+        if re.match(r'^0x[a-f0-9]{16}$', safe_friendly_name):
+            safe_friendly_name = f'device_{safe_friendly_name[2:]}'
+        self._safe_friendly_name_dict[friendly_name] = safe_friendly_name
 
-            # Build ports from exposed
-            control_port_args = {
-                'driver': DeviceControlPort,
-                'id': safe_friendly_name,
-                'type': core_ports.TYPE_BOOLEAN,
-                'writable': True,
-                'device_friendly_name': friendly_name,
-                'property_name': '',
-                'additional_attrdefs': {},
-            }
+        device_config = self.get_device_config(friendly_name)
+        force_attribute_properties = device_config.get('force_attribute_properties', set())
+        force_port_properties = device_config.get('force_port_properties', set())
 
-            # Using a dict instead of a list here ensures unique property names (and thus ids), only considering the
-            # latest entry.
-            port_args_by_id: dict[str, dict] = {}
+        # TODO: implement generic wildcard-capable "force_attribute_properties" and "force_port_properties"
 
-            # Build ports from features
-            exposed_non_features = []
-            force_attribute_features = []
-            for exposed_info in definition.get('exposes', []):
-                if 'endpoint' in exposed_info:
-                    endpoints.add(exposed_info['endpoint'])
+        exposed_items = self._parse_device_definition(definition)
 
-                features = exposed_info.get('features', [])
-                exposed_name = exposed_info.get('property') or exposed_info.get('name')
-                if exposed_name in force_port_properties:
-                    # If this exposed info has been forced as a port, consider it a feature itself
-                    features.append(exposed_info)
-                if not features:
-                    # Exposed info without features becomes attribute of control port
-                    exposed_non_features.append(exposed_info)
-                    continue
+        # Build ports from exposed
+        control_port_args = {
+            'driver': DeviceControlPort,
+            'id': safe_friendly_name,
+            'type': core_ports.TYPE_BOOLEAN,
+            'writable': True,
+            'device_friendly_name': friendly_name,
+            'additional_attrdefs': {},
+        }
 
-                for feature in features:
-                    name = feature.get('property') or feature.get('name')
-                    if not name:
-                        continue
-                    name = self._NAME_MAPPING.get(name, name)
-                    type_ = self._PORT_TYPE_MAPPING.get(feature.get('type'))
-                    if not type_:
-                        continue
-                    if name in force_attribute_properties:
-                        feature['exposed_name'] = exposed_name
-                        force_attribute_features.append(feature)
-                        continue
+        # Using a dict instead of a list here ensures unique property names (and thus ids), only considering the
+        # latest entry.
+        port_args_by_id: dict[str, dict] = {}
 
-                    port_args = {
-                        'driver': DevicePort,
-                        'id': name,
-                        'display_name': name.replace('_', ' ').title(),
-                        'type': type_,
-                        'writable': bool(feature['access'] & 2),
-                        'unit': feature.get('unit'),
-                        'min': feature.get('value_min'),
-                        'max': feature.get('value_max'),
-                        'additional_attrdefs': {},
-                        'device_friendly_name': friendly_name,
-                        'property_name': name,
-                        'property_group_name': exposed_name,
-                        'value_on': feature.get('value_on', True),
-                        'value_off': feature.get('value_off', False),
-                        'values': feature.get('values')
-                    }
-                    port_args_by_id[port_args['id']] = port_args
+        for exposed_item in exposed_items:
+            path_str = '.'.join(exposed_item['path'])
+            is_attrdef = (
+                exposed_item.get('category') in ('config', 'diagnostic')
+                or exposed_item.get('type') == 'text'
+            )
 
-            # Build additional attribute definitions from options and exposed non-features
-            options = definition.get('options', [])
-            for info in options + exposed_non_features + force_attribute_features:
-                name = info.get('property') or info.get('name')
-                name = self._NAME_MAPPING.get(name, name)
-                if name in force_port_properties:
-                    continue
+            if is_attrdef and path_str in force_port_properties:
+                is_attrdef = False
+            elif not is_attrdef and path_str in force_attribute_properties:
+                is_attrdef = True
 
-                type_ = self._ATTR_TYPE_MAPPING.get(info['type'])
+            if is_attrdef:
+                type_ = self._ATTR_TYPE_MAPPING.get(exposed_item.get('type'))
                 if not type_:
+                    self.warning('unexpected property type "%s"', exposed_item.get('type'))
                     continue
 
                 choices = None
-                values = info.get('values')
+                values = exposed_item.get('values')
                 values_dict = None
                 if values:
                     choices = [
@@ -723,37 +718,59 @@ class Zigbee2MQTTClient(Peripheral):
                     values_dict = {v: i for i, v in enumerate(values)}
 
                 attrdef = {
-                    'display_name': name.replace('_', ' ').title(),
+                    'display_name': exposed_item['label'],
                     'type': type_,
-                    'modifiable': bool(info.get('access', 0) & 2),
+                    'modifiable': bool(exposed_item.get('access', 0) & 2),
                     'persisted': False,
-                    'property_group_name': info.get('exposed_name'),
+                    'property_path': exposed_item['path'],
                 }
-                if info.get('description'):
-                    attrdef['description'] = info['description']
-                if info.get('unit'):
-                    attrdef['unit'] = info['unit']
-                if info.get('value_min') is not None:
-                    attrdef['min'] = info['value_min']
-                if info.get('value_max') is not None:
-                    attrdef['max'] = info['value_max']
+                if exposed_item.get('description'):
+                    attrdef['description'] = exposed_item['description']
+                if exposed_item.get('unit'):
+                    attrdef['unit'] = exposed_item['unit']
+                if exposed_item.get('value_min') is not None:
+                    attrdef['min'] = exposed_item['value_min']
+                if exposed_item.get('value_max') is not None:
+                    attrdef['max'] = exposed_item['value_max']
                 if type_ == 'boolean':
-                    attrdef['_value_on'] = info.get('value_on', True)
-                    attrdef['_value_off'] = info.get('value_off', False)
+                    attrdef['_value_on'] = exposed_item.get('value_on', True)
+                    attrdef['_value_off'] = exposed_item.get('value_off', False)
                 if values:
                     attrdef['_values'] = values
                     attrdef['_values_dict'] = values_dict
                     attrdef['choices'] = choices
 
-                control_port_args['additional_attrdefs'][name] = attrdef
+                control_port_args['additional_attrdefs'][exposed_item['property']] = attrdef
 
-            # Ensure port id prefix
-            for pa in port_args_by_id.values():
-                pa['id'] = f'{safe_friendly_name}.{pa["id"]}'
+            else:  # standalone port
+                type_ = self._PORT_TYPE_MAPPING.get(exposed_item.get('type'))
+                if not type_:
+                    self.warning('unexpected property type "%s"', exposed_item.get('type'))
+                    continue
 
-            all_port_args_list += [control_port_args] + list(port_args_by_id.values())
+                port_args = {
+                    'driver': DevicePort,
+                    'id': exposed_item['property'],
+                    'display_name': exposed_item['label'],
+                    'type': type_,
+                    'writable': bool(exposed_item['access'] & 2),
+                    'unit': exposed_item.get('unit'),
+                    'min': exposed_item.get('value_min'),
+                    'max': exposed_item.get('value_max'),
+                    'additional_attrdefs': {},
+                    'device_friendly_name': friendly_name,
+                    'property_path': exposed_item['path'],
+                    'value_on': exposed_item.get('value_on', True),
+                    'value_off': exposed_item.get('value_off', False),
+                    'values': exposed_item.get('values'),
+                }
+                port_args_by_id[port_args['id']] = port_args
 
-        return all_port_args_list
+        # Ensure port id prefix
+        for pa in port_args_by_id.values():
+            pa['id'] = f'{safe_friendly_name}.{pa["id"]}'
+
+        return [control_port_args] + list(port_args_by_id.values())
 
     def get_device_ports(self, friendly_name: Optional[str] = None) -> list[DevicePort]:
         if friendly_name:

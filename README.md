@@ -122,20 +122,22 @@ for details.
 
 ### `force_port_properties`
 
-By default, exposed information that is not marked as *feature* will be treated as an attribute of the corresponding
-qToggle control port. This option allows specifying a list of property names that will be associated to qToggle ports,
-even though they haven't been marked as *features* by zigbee2mqtt. See
-[zigbee2mqtt exposes](https://www.zigbee2mqtt.io/guide/usage/exposes.html#exposes) for details.
+By default, exposed capabilities with category set to `config` or `diagnostic` will be treated as an attribute of the
+corresponding qToggle control port. This option allows specifying a list of property names that will be associated to
+dedicated qToggle ports, regardless of their category (see
+[zigbee2mqtt exposes](https://www.zigbee2mqtt.io/guide/usage/exposes.html#exposes) for details). Capability (property)
+names are dot separated when they are part of a composite type (e.g. `color.hue`).
 
  * type: `[string]`
  * default: `[]`
 
 ### `force_attribute_properties`
 
-By default, exposed information that is marked as *feature* will be treated as a qToggle port. This option allows
-specifying a list of property names that will become attributes of the corresponding control port, even though they
-have been marked as *features* by zigbee2mqtt. See
-[zigbee2mqtt exposes](https://www.zigbee2mqtt.io/guide/usage/exposes.html#exposes) for details.
+By default, exposed capabilities with no category set will be treated as standalone qToggle ports. This option allows
+specifying a list of property names that will become attributes of the corresponding control port, regardless of their
+category (see
+[zigbee2mqtt exposes](https://www.zigbee2mqtt.io/guide/usage/exposes.html#exposes) for details). Capability (property)
+names are dot separated when they are part of a composite type (e.g. `color.hue`).
 
  * type: `[string]`
  * default: `[]`
