@@ -5,6 +5,7 @@ import logging
 import re
 import time
 
+from fnmatch import fnmatch
 from typing import Any, Optional, Union
 
 import aiomqtt
@@ -88,6 +89,7 @@ class Zigbee2MQTTClient(Peripheral):
         self._device_state_by_friendly_name: dict[str, tuple[int, GenericJSONDict]] = {}
         self._device_online_by_friendly_name: dict[str, bool] = {}
         self._device_config_by_friendly_name: dict[str, GenericJSONDict] = {}
+        self._device_config_cache_by_friendly_name: dict[str, GenericJSONDict] = {}
         self._safe_friendly_name_dict: dict[str, str] = {}
         self._bridge_info: Optional[GenericJSONDict] = None
         self._pending_requests: dict[str, dict[str, Any]] = {}
@@ -257,6 +259,7 @@ class Zigbee2MQTTClient(Peripheral):
             friendly_name = config.get('friendly_name', ieee_address)
             config['ieee_address'] = ieee_address
             self._device_config_by_friendly_name[friendly_name] = config
+            self._device_config_cache_by_friendly_name.pop(friendly_name, None)
 
         self.update_ports_from_device_info_asap()
 
@@ -439,14 +442,23 @@ class Zigbee2MQTTClient(Peripheral):
         await self.publish_mqtt_message(topic, payload_json)
 
     async def set_device_config(self, friendly_name: str, config: Any) -> None:
-        self.debug('setting device "%s" config "%s"', friendly_name, json_utils.dumps(config))
+        self.debug('updating device "%s" config "%s"', friendly_name, json_utils.dumps(config))
         await self.do_request('device/options', {'id': friendly_name, 'options': config})
 
     def get_device_config(self, friendly_name: str) -> GenericJSONDict:
-        return (
-            self.static_device_config.get(friendly_name, {}) |
-            self._device_config_by_friendly_name.get(friendly_name, {})
-        )
+        config = self._device_config_cache_by_friendly_name.get(friendly_name)
+        if config is None:
+            config = {}
+            for friendly_name_pat, static_config in self.static_device_config.items():
+                if fnmatch(friendly_name, friendly_name_pat):
+                    config |= static_config
+
+            config |= self._device_config_by_friendly_name.get(friendly_name, {})
+
+            self._device_config_cache_by_friendly_name[friendly_name] = config
+            self.debug('config for device "%s" is "%s"', friendly_name, json_utils.dumps(config))
+
+        return config
 
     def _make_transaction_id(self) -> str:
         return f'{self.mqtt_client_id}_{int(time.time() * 1000)}'
@@ -513,6 +525,7 @@ class Zigbee2MQTTClient(Peripheral):
         device_dicts = [
             self._device_online_by_friendly_name,
             self._device_config_by_friendly_name,
+            self._device_config_cache_by_friendly_name,
             self._device_info_by_friendly_name,
             self._device_state_by_friendly_name,
         ]
