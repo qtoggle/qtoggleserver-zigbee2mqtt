@@ -86,7 +86,7 @@ class Zigbee2MQTTClient(Peripheral):
         self._mqtt_base_topic_len: int = len(mqtt_base_topic)
         self._client_task: Optional[asyncio.Task] = None
         self._device_info_by_friendly_name: dict[str, GenericJSONDict] = {}
-        self._device_state_by_friendly_name: dict[str, tuple[int, GenericJSONDict]] = {}
+        self._device_state_by_friendly_name: dict[str, tuple[int, GenericJSONDict]] = {}  # TODO: lose the timestamp
         self._device_online_by_friendly_name: dict[str, bool] = {}
         self._device_config_by_friendly_name: dict[str, GenericJSONDict] = {}
         self._device_config_cache_by_friendly_name: dict[str, GenericJSONDict] = {}
@@ -253,6 +253,8 @@ class Zigbee2MQTTClient(Peripheral):
     async def handle_bridge_info_message(self, payload_json: GenericJSONDict) -> None:
         self._bridge_info = payload_json
 
+        old_device_config_by_friendly_name = dict(self._device_config_by_friendly_name)
+
         self._device_config_by_friendly_name.clear()
         devices_config = payload_json.get('config', {}).get('devices')
         for ieee_address, config in devices_config.items():
@@ -260,6 +262,9 @@ class Zigbee2MQTTClient(Peripheral):
             config['ieee_address'] = ieee_address
             self._device_config_by_friendly_name[friendly_name] = config
             self._device_config_cache_by_friendly_name.pop(friendly_name, None)
+
+            old_config = old_device_config_by_friendly_name.get(friendly_name, {})
+            await self._maybe_trigger_port_update(friendly_name, old_config, config)
 
         self.update_ports_from_device_info_asap()
 
@@ -362,34 +367,7 @@ class Zigbee2MQTTClient(Peripheral):
         state.update(processed_payload_json)
         self._device_state_by_friendly_name[friendly_name] = int(time.time()), state
 
-        device_ports = self.get_device_ports(friendly_name)
-
-        # Gather all properties that represent port values
-        value_properties = set()
-        for port in device_ports:
-            if not isinstance(port, DeviceControlPort):
-                value_properties.add(port.get_property_path()[0])
-
-        # Gather all properties that have just changed
-        changed_properties = (
-            set(k for k, v in state.items() if v != old_state.get(k)) |
-            set(k for k, v in old_state.items() if v != state.get(k))
-        )
-
-        # If only value properties have changed, don't trigger unnecessary `port-update` events
-        only_values_changed = not (changed_properties - value_properties)
-        if only_values_changed:
-            return
-
-        # Trigger `port-update` on all affected ports
-        for port in device_ports:
-            attr_properties = set(await port.get_additional_attrdefs())
-            if not (attr_properties & changed_properties):
-                continue
-            port.invalidate_attrs()
-            if port.is_enabled():
-                await port.trigger_update()
-                port.save_asap()
+        await self._maybe_trigger_port_update(friendly_name, old_state, state)
 
     async def do_request(self, subtopic: str, payload_json: GenericJSONDict) -> tuple[str, GenericJSONDict]:
         if not self._mqtt_client:
@@ -420,7 +398,22 @@ class Zigbee2MQTTClient(Peripheral):
             finally:
                 self._pending_requests.pop(transaction_id, None)
 
-    async def query_device_state(self, friendly_name: str, properties: Optional[list[str]]) -> None:
+    def get_device_state(self, friendly_name: str) -> Any:
+        timestamped_state = self._device_state_by_friendly_name.get(friendly_name)
+        if not timestamped_state:
+            return
+
+        _, state = timestamped_state
+
+        return state
+
+    async def set_device_state(self, friendly_name: str, value: Any) -> None:
+        self.debug('updating device "%s" state to "%s"', friendly_name, json_utils.dumps(value))
+        topic = f'{self.mqtt_base_topic}/{friendly_name}/set'
+        value = {self._REV_PROPERTY_MAPPING.get(k, k): v for k, v in value.items()}
+        await self.publish_mqtt_message(topic, value)
+
+    async def query_device_state(self, friendly_name: str, properties: Optional[list[str]] = None) -> None:
         config = self.get_device_config(friendly_name)
         topic = f'{self.mqtt_base_topic}/{friendly_name}/get'
         state_property = config.get('get_state_property', 'state')
@@ -433,17 +426,6 @@ class Zigbee2MQTTClient(Peripheral):
             payload_json.update({p: '' for p in properties})
 
         await self.publish_mqtt_message(topic, payload_json)
-
-    async def set_device_property(self, friendly_name: str, property_name: str, value: Any) -> None:
-        self.debug('setting device "%s" property "%s" to %s', friendly_name, property_name, json_utils.dumps(value))
-        topic = f'{self.mqtt_base_topic}/{friendly_name}/set'
-        property_name = self._REV_PROPERTY_MAPPING.get(property_name, property_name)
-        payload_json = {property_name: value}
-        await self.publish_mqtt_message(topic, payload_json)
-
-    async def set_device_config(self, friendly_name: str, config: Any) -> None:
-        self.debug('updating device "%s" config "%s"', friendly_name, json_utils.dumps(config))
-        await self.do_request('device/options', {'id': friendly_name, 'options': config})
 
     def get_device_config(self, friendly_name: str) -> GenericJSONDict:
         config = self._device_config_cache_by_friendly_name.get(friendly_name)
@@ -459,6 +441,10 @@ class Zigbee2MQTTClient(Peripheral):
             self.debug('config for device "%s" is "%s"', friendly_name, json_utils.dumps(config))
 
         return config
+
+    async def set_device_config(self, friendly_name: str, config: Any) -> None:
+        self.debug('updating device "%s" config to "%s"', friendly_name, json_utils.dumps(config))
+        await self.do_request('device/options', {'id': friendly_name, 'options': config})
 
     def _make_transaction_id(self) -> str:
         return f'{self.mqtt_client_id}_{int(time.time() * 1000)}'
@@ -480,20 +466,6 @@ class Zigbee2MQTTClient(Peripheral):
 
     def get_device_safe_friendly_name(self, friendly_name: str) -> str:
         return self._safe_friendly_name_dict.get(friendly_name, friendly_name)
-
-    def get_device_property(self, friendly_name: str, property_name: str) -> Any:
-        timestamped_state = self._device_state_by_friendly_name.get(friendly_name)
-        if not timestamped_state:
-            return
-
-        timestamp, state = timestamped_state
-        value = state.get(property_name)
-
-        if value is None and property_name == 'address':
-            device_info = self._device_info_by_friendly_name.get(friendly_name, {})
-            value = device_info.get('ieee_address')
-
-        return value
 
     def is_device_online(self, friendly_name: str) -> Optional[bool]:
         return self._device_online_by_friendly_name.get(friendly_name, False)
@@ -599,6 +571,7 @@ class Zigbee2MQTTClient(Peripheral):
                 changed_friendly_names.add(port_args['device_friendly_name'])
                 await self.add_port(port_args)
 
+        # Explicitly query device state for changed devices, where needed
         if self._mqtt_client:
             for friendly_name, online in list(self._device_online_by_friendly_name.items()):
                 if not online:
@@ -610,10 +583,17 @@ class Zigbee2MQTTClient(Peripheral):
                 pal = port_args_list_by_friendly_name.get(friendly_name, [])
                 property_names = set()
                 for port_args in pal:
-                    attrdefs = port_args.get('additional_attrdefs', {})
-                    property_names = property_names.union(self._REV_PROPERTY_MAPPING.get(a, a) for a in attrdefs)
-                    if port_args.get('property_name'):
-                        property_names.add(port_args['property_name'])
+                    if port_args['driver'] is DeviceControlPort:
+                        attrdefs = port_args.get('additional_attrdefs', {})
+                        for attrdef in attrdefs.values():
+                            if attrdef.get('storage') != 'state':
+                                continue
+                            root_property = attrdef.get('property_path', [])[0]
+                            property_names.add(self._REV_PROPERTY_MAPPING.get(root_property, root_property))
+                    else:  # regular device port
+                        if port_args.get('storage') == 'state':
+                            root_property = port_args.get('property_path', [])[0]
+                            property_names.add(self._REV_PROPERTY_MAPPING.get(root_property, root_property))
                 await self.query_device_state(friendly_name, list(property_names))
 
     def _parse_device_definition_rec(self, exposed_item: dict[str, Any], path: list[str]) -> list[dict[str, Any]]:
@@ -643,11 +623,11 @@ class Zigbee2MQTTClient(Peripheral):
 
     def _parse_device_definition(self, definition: dict[str, Any]) -> list[dict[str, Any]]:
         return [
-            result
+            result | {'storage': 'config'}
             for option in definition.get('options', [])
             for result in self._parse_device_definition_rec(option, [])
         ] + [
-            result
+            result | {'storage': 'state'}
             for exposed in definition.get('exposes', [])
             for result in self._parse_device_definition_rec(exposed, [])
         ]
@@ -681,8 +661,6 @@ class Zigbee2MQTTClient(Peripheral):
         force_attribute_properties = device_config.get('force_attribute_properties', set())
         force_port_properties = device_config.get('force_port_properties', set())
 
-        # TODO: implement generic wildcard-capable "force_attribute_properties" and "force_port_properties"
-
         exposed_items = self._parse_device_definition(definition)
 
         # Build ports from exposed
@@ -704,7 +682,7 @@ class Zigbee2MQTTClient(Peripheral):
             is_attrdef = (
                 exposed_item.get('category') in ('config', 'diagnostic')
                 or exposed_item.get('type') == 'text'
-                or exposed_item.get('property') == 'state_action'
+                or exposed_item.get('storage') == 'config'
             )
 
             if is_attrdef and any(fnmatch(path_str, pat) for pat in force_port_properties):
@@ -737,6 +715,7 @@ class Zigbee2MQTTClient(Peripheral):
                     'modifiable': bool(exposed_item.get('access', 0) & 2),
                     'persisted': False,
                     'property_path': exposed_item['path'],
+                    'storage': exposed_item['storage'],
                 }
                 if exposed_item.get('description'):
                     attrdef['description'] = exposed_item['description']
@@ -774,6 +753,7 @@ class Zigbee2MQTTClient(Peripheral):
                     'additional_attrdefs': {},
                     'device_friendly_name': friendly_name,
                     'property_path': exposed_item['path'],
+                    'storage': exposed_item['storage'],
                     'value_on': exposed_item.get('value_on', True),
                     'value_off': exposed_item.get('value_off', False),
                     'values': exposed_item.get('values'),
@@ -797,6 +777,36 @@ class Zigbee2MQTTClient(Peripheral):
             ]
         else:
             return [p for p in self.get_ports() if isinstance(p, DevicePort)]
+
+    async def _maybe_trigger_port_update(self, friendly_name: str, old_properties: dict, new_properties: dict) -> None:
+        # Gather all properties that have just changed
+        changed_properties = (
+            set(k for k, v in new_properties.items() if v != old_properties.get(k))
+            | set(k for k, v in old_properties.items() if v != new_properties.get(k))
+        )
+
+        # Gather all properties that represent port values
+        device_ports = self.get_device_ports(friendly_name)
+        value_properties = set()
+        for port in device_ports:
+            if not isinstance(port, DeviceControlPort):
+                value_properties.add(port.get_property_path()[0])
+
+        # If only port value properties have changed, don't trigger unnecessary `port-update` events
+        only_value_properties_changed = not (changed_properties - value_properties)
+        if only_value_properties_changed:
+            return
+
+        # Trigger `port-update` on all affected ports
+        for port in device_ports:
+            attrdefs = await port.get_additional_attrdefs()
+            attr_properties = set(a['property_path'][0] for a in attrdefs.values() if a.get('property_path'))
+            if not (attr_properties & changed_properties):
+                continue
+            port.invalidate_attrs()
+            if port.is_enabled():
+                await port.trigger_update()
+                port.save_asap()
 
 
 from .ports import PermitJoinPort, DeviceControlPort, DevicePort  # noqa: E402

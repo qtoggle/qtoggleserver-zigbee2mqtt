@@ -43,8 +43,9 @@ class DevicePort(Zigbee2MQTTPort):
         unit: Optional[str] = None,
         min: Optional[float] = None,
         max: Optional[float] = None,
-        additional_attrdefs: Optional[AttributeDefinitions] = None,
-        property_path: Optional[list[str]] = None,
+        additional_attrdefs: Optional[AttributeDefinitions] = None,  # TODO:
+        property_path: Optional[list[str]] = None,  # TODO: should not be optional!
+        storage: Optional[str] = None,  # TODO: should not be optional!
         device_friendly_name: str,
         value_on: Any = True,
         value_off: Any = False,
@@ -64,6 +65,7 @@ class DevicePort(Zigbee2MQTTPort):
         self._additional_attrdefs: AttributeDefinitions = additional_attrdefs or {}
         self._device_friendly_name: str = device_friendly_name
         self._property_path: list[str] = property_path or []
+        self._storage: str = storage
         self._value_on: Any = value_on
         self._value_off: Any = value_off
         self._values: Optional[list[str]] = values
@@ -83,7 +85,10 @@ class DevicePort(Zigbee2MQTTPort):
         return self.ADDITIONAL_ATTRDEFS | self._additional_attrdefs
 
     async def read_value(self) -> NullablePortValue:
-        value = self.get_property_value(self.get_property_path())
+        if self._storage == 'state':
+            value = self.get_state_property(self.get_property_path())
+        else:
+            value = self.get_config_property(self.get_property_path())
 
         if await self.get_type() == core_ports.TYPE_BOOLEAN:
             value = (value == self._value_on)
@@ -108,7 +113,10 @@ class DevicePort(Zigbee2MQTTPort):
             except IndexError:
                 raise ValueError(f'Invalid choice: {value}')
 
-        await self.set_property_value(self.get_property_path(), value)
+        if self._storage == 'state':
+            await self.set_state_property(self.get_property_path(), value)
+        else:
+            await self.set_config_property(self.get_property_path(), value)
 
     async def attr_is_online(self) -> bool:
         return (
@@ -125,31 +133,52 @@ class DevicePort(Zigbee2MQTTPort):
     def get_property_path(self) -> list[str]:
         return self._property_path
 
-    def get_property_value(self, property_path: list[str]) -> Any:
+    def get_state_property(self, property_path: list[str]) -> Any:
         assert len(property_path) > 0
 
-        value = self.get_peripheral().get_device_property(self.get_device_friendly_name(), property_path[0])
-        if value is None:
-            return None
-        for property_name in property_path[1:]:
+        value = self.get_peripheral().get_device_state(self.get_device_friendly_name()) or {}
+        for property_name in property_path:
             value = value.get(property_name)
             if value is None:
                 return None
 
         return value
 
-    async def set_property_value(self, property_path: list[str], value: Any) -> None:
+    async def set_state_property(self, property_path: list[str], value: Any) -> None:
         assert len(property_path) > 0
 
-        for property_name in property_path[1:]:
+        for property_name in reversed(property_path):
             value = {
                 property_name: value
             }
 
-        await self.get_peripheral().set_device_property(self.get_device_friendly_name(), property_path[0], value)
+        await self.get_peripheral().set_device_state(self.get_device_friendly_name(), value)
+
+    # TODO check if port-update triggered on config property change
+
+    def get_config_property(self, property_path: list[str]) -> Any:
+        assert len(property_path) > 0
+
+        value = self.get_peripheral().get_device_config(self.get_device_friendly_name()) or {}
+        for property_name in property_path:
+            value = value.get(property_name)
+            if value is None:
+                return None
+
+        return value
+
+    async def set_config_property(self, property_path: list[str], value: Any) -> None:
+        assert len(property_path) > 0
+
+        for property_name in reversed(property_path):
+            value = {
+                property_name: value
+            }
+
+        await self.get_peripheral().set_device_config(self.get_device_friendly_name(), value)
 
 
-class DeviceControlPort(DevicePort):
+class DeviceControlPort(DevicePort):  # TODO: this is not a DevicePort!
     ADDITIONAL_ATTRDEFS = {
         'friendly_name': {
             'display_name': 'Friendly Name',
@@ -158,11 +187,13 @@ class DeviceControlPort(DevicePort):
             'modifiable': True,
             'persisted': False,
         },
-        'address': {
+        'ieee_address': {
             'display_name': 'Address',
             'description': 'Zigbee IEEE Address',
-            'ttype': 'string',
+            'type': 'string',
             'modifiable': False,
+            'property_path': ['ieee_address'],
+            'storage': 'config',
         }
     }
 
@@ -233,7 +264,7 @@ class DeviceControlPort(DevicePort):
         return self.get_device_friendly_name()
 
     async def attr_get_value(self, name: str) -> Optional[Attribute]:
-        attrdefs = await self.get_attrdefs()
+        attrdefs = await self.get_additional_attrdefs()
         attrdef = attrdefs.get(name)
         if not attrdef:
             return None
@@ -243,7 +274,11 @@ class DeviceControlPort(DevicePort):
             return None
 
         # At this point we know this attribute is a Zigbee device property
-        value = self.get_property_value(property_path)
+        if attrdef['storage'] == 'state':
+            value = self.get_state_property(property_path)
+        else:
+            value = self.get_config_property(property_path)
+
         if value is None:
             # Supply a default value if not found in state
             if attrdef.get('type') == 'boolean':
@@ -269,9 +304,13 @@ class DeviceControlPort(DevicePort):
         return value
 
     async def attr_set_value(self, name: str, value: Attribute) -> None:
-        attrdefs = await self.get_attrdefs()
+        attrdefs = await self.get_additional_attrdefs()
         attrdef = attrdefs.get(name)
         if not attrdef:
+            return
+
+        # Ensure this is a Zigbee property
+        if not attrdef.get('property_path'):
             return
 
         if attrdef.get('type') == 'boolean':
@@ -285,7 +324,10 @@ class DeviceControlPort(DevicePort):
             except IndexError:
                 raise ValueError(f'Invalid choice: {value}')
 
-        await self.set_property_value(attrdef['property_path'], value)
+        if attrdef['storage'] == 'state':
+            await self.set_state_property(attrdef['property_path'], value)
+        else:
+            await self.set_config_property(attrdef['property_path'], value)
 
     async def read_value(self) -> NullablePortValue:
         return self.get_peripheral().is_device_enabled(self.get_device_friendly_name())
