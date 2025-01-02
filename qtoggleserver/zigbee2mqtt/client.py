@@ -704,6 +704,7 @@ class Zigbee2MQTTClient(Peripheral):
             is_attrdef = (
                 exposed_item.get('category') in ('config', 'diagnostic')
                 or exposed_item.get('type') == 'text'
+                or exposed_item.get('property') == 'state_action'
             )
 
             if is_attrdef and any(fnmatch(path_str, pat) for pat in force_port_properties):

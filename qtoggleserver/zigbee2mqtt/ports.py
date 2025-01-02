@@ -129,6 +129,8 @@ class DevicePort(Zigbee2MQTTPort):
         assert len(property_path) > 0
 
         value = self.get_peripheral().get_device_property(self.get_device_friendly_name(), property_path[0])
+        if value is None:
+            return None
         for property_name in property_path[1:]:
             value = value.get(property_name)
             if value is None:
@@ -240,9 +242,20 @@ class DeviceControlPort(DevicePort):
         if not property_path:
             return None
 
+        # At this point we know this attribute is a Zigbee device property
         value = self.get_property_value(property_path)
         if value is None:
-            return None
+            # Supply a default value if not found in state
+            if attrdef.get('type') == 'boolean':
+                value = attrdef.get('_value_off', False)
+            elif attrdef.get('_values'):  # map Z2M value to choice
+                value = attrdef['_values'][0]  # first value in enum
+            elif attrdef.get('min') is not None:
+                value = attrdef.get('min')
+            elif attrdef.get('max') is not None:
+                value = attrdef.get('max')
+            else:
+                value = 0
 
         if attrdef.get('type') == 'boolean':
             value = (value == attrdef.get('_value_on', True))
