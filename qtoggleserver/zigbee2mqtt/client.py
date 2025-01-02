@@ -86,7 +86,7 @@ class Zigbee2MQTTClient(Peripheral):
         self._mqtt_base_topic_len: int = len(mqtt_base_topic)
         self._client_task: Optional[asyncio.Task] = None
         self._device_info_by_friendly_name: dict[str, GenericJSONDict] = {}
-        self._device_state_by_friendly_name: dict[str, tuple[int, GenericJSONDict]] = {}  # TODO: lose the timestamp
+        self._device_state_by_friendly_name: dict[str, GenericJSONDict] = {}
         self._device_online_by_friendly_name: dict[str, bool] = {}
         self._device_config_by_friendly_name: dict[str, GenericJSONDict] = {}
         self._device_config_cache_by_friendly_name: dict[str, GenericJSONDict] = {}
@@ -362,10 +362,10 @@ class Zigbee2MQTTClient(Peripheral):
             n = self._PROPERTY_MAPPING.get(n, n)
             processed_payload_json[n] = v
 
-        _, state = self._device_state_by_friendly_name.get(friendly_name, (0, {}))
+        state = self._device_state_by_friendly_name.get(friendly_name, {})
         old_state = dict(state)
         state.update(processed_payload_json)
-        self._device_state_by_friendly_name[friendly_name] = int(time.time()), state
+        self._device_state_by_friendly_name[friendly_name] = state
 
         await self._maybe_trigger_port_update(friendly_name, old_state, state)
 
@@ -398,14 +398,8 @@ class Zigbee2MQTTClient(Peripheral):
             finally:
                 self._pending_requests.pop(transaction_id, None)
 
-    def get_device_state(self, friendly_name: str) -> Any:
-        timestamped_state = self._device_state_by_friendly_name.get(friendly_name)
-        if not timestamped_state:
-            return
-
-        _, state = timestamped_state
-
-        return state
+    def get_device_state(self, friendly_name: str) -> GenericJSONDict:
+        return self._device_state_by_friendly_name.get(friendly_name, {})
 
     async def set_device_state(self, friendly_name: str, value: Any) -> None:
         self.debug('updating device "%s" state to "%s"', friendly_name, json_utils.dumps(value))
