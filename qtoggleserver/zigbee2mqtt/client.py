@@ -36,7 +36,7 @@ class Zigbee2MQTTClient(Peripheral):
     _REV_PROPERTY_MAPPING = {v: k for k, v in _PROPERTY_MAPPING.items()}
 
     _LABEL_MAPPING = {
-        'Linkquality': 'Link Quality',
+        'Linkquality': 'Link quality',
     }
 
     _PORT_TYPE_MAPPING = {
@@ -706,9 +706,9 @@ class Zigbee2MQTTClient(Peripheral):
                 or exposed_item.get('type') == 'text'
             )
 
-            if is_attrdef and path_str in force_port_properties:
+            if is_attrdef and any(fnmatch(path_str, pat) for pat in force_port_properties):
                 is_attrdef = False
-            elif not is_attrdef and path_str in force_attribute_properties:
+            elif not is_attrdef and any(fnmatch(path_str, pat) for pat in force_attribute_properties):
                 is_attrdef = True
 
             if is_attrdef:
