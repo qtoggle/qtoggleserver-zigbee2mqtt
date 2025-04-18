@@ -340,10 +340,10 @@ class Zigbee2MQTTClient(Peripheral):
         payload_str: Optional[str],
         payload_json: Optional[GenericJSONDict]
     ) -> None:
-        if payload_str is not None:
-            state = payload_str
+        if payload_json is not None:
+            state = payload_json.get('state', 'offline')
         else:
-            state = payload_json['state']
+            state = payload_str or 'offline'
 
         self.debug('device "%s" is now "%s"', friendly_name, state)
         self.trigger_port_update_fire_and_forget()
