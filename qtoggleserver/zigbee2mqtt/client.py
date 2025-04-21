@@ -24,7 +24,7 @@ class Zigbee2MQTTClient(Peripheral):
     DEFAULT_MQTT_BASE_TOPIC = 'zigbee2mqtt'
     DEFAULT_MQTT_RECONNECT_INTERVAL = 5  # seconds
     DEFAULT_BRIDGE_REQUEST_TIMEOUT = 10  # seconds
-    DEFAULT_PERMIT_JOIN_TIMEOUT = 3600  # seconds
+    DEFAULT_PERMIT_JOIN_TIMEOUT = 240  # seconds
 
     _MAX_INCOMING_QUEUE_SIZE = 256
     _MAX_OUTGOING_QUEUE_SIZE = 256
@@ -242,10 +242,10 @@ class Zigbee2MQTTClient(Peripheral):
         payload_str: Optional[str],
         payload_json: Optional[GenericJSONDict]
     ) -> None:
-        if payload_str is not None:
-            state = payload_str
+        if payload_json is not None:
+            state = payload_json.get('state', 'offline')
         else:
-            state = payload_json['state']
+            state = payload_str or 'offline'
 
         self.debug('bridge state is now "%s"', state)
         self.set_online(state == 'online')
@@ -340,10 +340,10 @@ class Zigbee2MQTTClient(Peripheral):
         payload_str: Optional[str],
         payload_json: Optional[GenericJSONDict]
     ) -> None:
-        if payload_str is not None:
-            state = payload_str
+        if payload_json is not None:
+            state = payload_json.get('state', 'offline')
         else:
-            state = payload_json['state']
+            state = payload_str or 'offline'
 
         self.debug('device "%s" is now "%s"', friendly_name, state)
         self.trigger_port_update_fire_and_forget()
@@ -446,12 +446,14 @@ class Zigbee2MQTTClient(Peripheral):
     def get_bridge_info(self) -> Optional[GenericJSONDict]:
         return self._bridge_info
 
-    async def set_permit_join(self, value: bool) -> None:
-        await self.do_request('permit_join', {'value': value, 'time': self.permit_join_timeout})
+    async def set_permit_join(self, value: bool, friendly_name: Optional[str] = None) -> None:
+        await self.do_request(
+            'permit_join', {'time': self.permit_join_timeout if value else 0, 'device': friendly_name}
+        )
 
     def is_permit_join(self) -> Optional[bool]:
         if not self._bridge_info:
-            return
+            return None
 
         return self._bridge_info.get('permit_join', False)
 

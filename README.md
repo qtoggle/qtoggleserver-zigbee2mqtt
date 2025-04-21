@@ -93,7 +93,7 @@ bridge.
 Indicates the timeout, in seconds, to permit new Zigbee devices to join, once enabled.
 
  * type: `integer`
- * default: `3600`
+ * default: `240`
 
 ### `device_config`
 
