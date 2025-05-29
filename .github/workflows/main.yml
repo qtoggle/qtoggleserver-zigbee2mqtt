@@ -4,18 +4,18 @@ on: push
 
 jobs:
 
-  flake8:
-    name: Flake8
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - name: Source code checkout
-        uses: actions/checkout@master
+        uses: actions/checkout@v4
       - name: Python setup
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: '3.10'
       - name: Install dev deps
-        run: pip install flake8 flake8-annotations
+        run: pip install -r requirements-dev.txt
       - name: Flake8
         run: flake8 qtoggleserver
 

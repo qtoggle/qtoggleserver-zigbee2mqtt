@@ -93,13 +93,15 @@ bridge.
 Indicates the timeout, in seconds, to permit new Zigbee devices to join, once enabled.
 
  * type: `integer`
- * default: `3600`
+ * default: `240`
 
 ### `device_config`
 
+# TODO document wildcards
+
 Allows specifying static configuration for particular Zigbee devices. Each entry in the dictionary is the (friendly)
-name of a device associated to a configuration dictionary. See [Device Configuration](#device-configuration) for details
-on the available configuration options.
+name of a device associated to a configuration dictionary or a wildcard pattern that friendly names of devices must
+match. See [Device Configuration](#device-configuration) for details on the available configuration options.
 
  * type: `dictionary`
  * default: `{}`
@@ -122,11 +124,12 @@ for details.
 
 ### `force_port_properties`
 
-By default, exposed capabilities with category set to `config` or `diagnostic` will be treated as an attribute of the
-corresponding qToggle control port. This option allows specifying a list of property names that will be associated to
-dedicated qToggle ports, regardless of their category (see
+By default, exposed capabilities with category set to `config` or `diagnostic`, along with exposed options, will be
+treated as attributes of the corresponding qToggle control port. This option allows specifying a list of property names
+that will be associated to dedicated qToggle ports, regardless of their category (see
 [zigbee2mqtt exposes](https://www.zigbee2mqtt.io/guide/usage/exposes.html#exposes) for details). Capability (property)
-names are dot separated when they are part of a composite type (e.g. `color.hue`).
+names are dot separated when they are part of a composite type (e.g. `color.hue`). Wildcards are also supported (e.g.
+`color.*` will match all the properties inside the `color` composite type).
 
  * type: `[string]`
  * default: `[]`
@@ -137,7 +140,8 @@ By default, exposed capabilities with no category set will be treated as standal
 specifying a list of property names that will become attributes of the corresponding control port, regardless of their
 category (see
 [zigbee2mqtt exposes](https://www.zigbee2mqtt.io/guide/usage/exposes.html#exposes) for details). Capability (property)
-names are dot separated when they are part of a composite type (e.g. `color.hue`).
+names are dot separated when they are part of a composite type (e.g. `color.hue`). Wildcards are also supported (e.g.
+`color.*` will match all the properties inside the `color` composite type).
 
  * type: `[string]`
  * default: `[]`

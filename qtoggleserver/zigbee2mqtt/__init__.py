@@ -1,4 +1,7 @@
 from .client import Zigbee2MQTTClient
 
 
-VERSION = 'unknown'
+__all__ = ["Zigbee2MQTTClient", "aaa"]
+
+
+VERSION = "unknown"
