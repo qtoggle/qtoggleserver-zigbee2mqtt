@@ -3,6 +3,8 @@ repos:
   rev: v0.11.12
   hooks:
     - id: ruff-check
+      args: ["--config", "pyproject.toml"]
       language: system
     - id: ruff-format
+      args: ["--config", "pyproject.toml"]
       language: system
