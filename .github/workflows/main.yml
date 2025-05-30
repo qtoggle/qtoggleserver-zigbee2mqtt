@@ -18,26 +18,8 @@ jobs:
       - lint
     runs-on: ubuntu-latest
     steps:
-      - name: Source code checkout
-        uses: actions/checkout@v4
-      - name: Update source version
-        run: |
-          [[ "${GITHUB_REF_NAME}" =~ ^version-.*$ ]] && VERSION=${GITHUB_REF_NAME:8} || VERSION=0.0.0;
-          sed -i "s/unknown-version/${VERSION}/" qtoggleserver/*/__init__.py pyproject.toml;
-          echo "VERSION = ${VERSION}"
-      - name: Python Setup
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
       - name: Build Python package
-        run: uv build
-      - name: Store dist package
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-package-dist
-          path: dist/
+        uses: qtoggle/actions-common/actions/build-python-package@wip
 
   publish:
     name: Publish Package
