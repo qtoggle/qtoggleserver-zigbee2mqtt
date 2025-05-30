@@ -4,6 +4,6 @@ on: push
 
 jobs:
   addon-main:
+    name: Main
     uses: qtoggle/actions-common/.github/workflows/addon-main.yml@wip
     secrets: inherit
-
