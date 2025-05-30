@@ -5,12 +5,17 @@ description = "qToggleServer integration with Zigbee2MQTT"
 authors = [
     {name = "Calin Crisan", email = "ccrisan@gmail.com"},
 ]
-dependencies = [
-    "aiomqtt",
-]
 requires-python = "==3.10.*"
 readme = "README.md"
 license = {text = "Apache 2.0"}
+dependencies = [
+    "aiomqtt",
+]
+
+[dependency-groups]
+dev = [
+  "ruff",
+]
 
 [tool.ruff]
 line-length = 120
