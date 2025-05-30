@@ -10,11 +10,8 @@ jobs:
     steps:
       - name: Source code checkout
         uses: actions/checkout@v4
-      - name: Update source version
-        run: |
-          [[ "${GITHUB_REF_NAME}" =~ ^version-.*$ ]] && VERSION=${GITHUB_REF_NAME:8} || VERSION=0.0.0;
-          sed -i "s/unknown-version/${VERSION}/" qtoggleserver/*/__init__.py pyproject.toml;
-          echo "VERSION = ${VERSION}"
+      - name: Replace source version
+        uses: qtoggle/actions-common/replace-source-version
       - name: Python setup
         uses: actions/setup-python@v5
         with:
