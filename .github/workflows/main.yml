@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Replace source version
-        uses: qtoggle/actions-common/lint-python@wip
+        uses: qtoggle/actions-common/actions/lint-python@wip
 
   build:
     name: Build Package
