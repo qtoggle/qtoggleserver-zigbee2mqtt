@@ -6,3 +6,4 @@ jobs:
   addon-main:
     uses: qtoggle/actions-common/.github/workflows/addon-main.yml@wip
     secrets: inherit
+
