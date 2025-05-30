@@ -3,38 +3,6 @@ name: Main
 on: push
 
 jobs:
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - name: Replace source version
-        uses: qtoggle/actions-common/actions/lint-python@wip
-
-  build:
-    name: Build Package
-    if: startsWith(github.ref, 'refs/tags/version-')
-    needs:
-      - lint
-    runs-on: ubuntu-latest
-    steps:
-      - name: Build Python package
-        uses: qtoggle/actions-common/actions/build-python-package@wip
-
-  publish:
-    name: Publish Package
-    if: startsWith(github.ref, 'refs/tags/version-')
-    needs:
-      - build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Fetch dist package
-        uses: actions/download-artifact@v4
-        with:
-          name: python-package-dist
-          path: dist/
-      - name: Publish package
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          user: __token__
-          password: ${{ secrets.PYPI_TOKEN }}
+  addon-main:
+    uses: qtoggle/actions-common/workflows/addon-main.yml@wip
+    secrets: inherit
