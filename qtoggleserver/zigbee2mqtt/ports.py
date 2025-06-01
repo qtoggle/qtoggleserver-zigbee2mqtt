@@ -159,7 +159,7 @@ class DevicePort(BaseDevicePort):
                 value = self._value_off
         elif self._values:  # map choice to Z2M value
             try:
-                value = self._values[value - 1]
+                value = self._values[int(value - 1)]
             except IndexError:
                 raise ValueError(f"Invalid choice: {value}")
 
@@ -338,7 +338,7 @@ class DeviceControlPort(BaseDevicePort):
                 value = attrdef.get("_value_off", False)
         elif attrdef.get("_values"):  # map choice to Z2M value
             try:
-                value = attrdef.get("_values", [])[value - 1]
+                value = attrdef.get("_values", [])[int(value - 1)]
             except IndexError:
                 raise ValueError(f"Invalid choice: {value}")
 
