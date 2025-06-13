@@ -4,7 +4,7 @@ class Zigbee2MQTTException(Exception):
 
 class ClientNotConnected(Zigbee2MQTTException):
     def __init__(self) -> None:
-        super().__init__('MQTT client not connected')
+        super().__init__("MQTT client not connected")
 
 
 class RequestTimeout(Zigbee2MQTTException):
