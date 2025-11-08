@@ -247,6 +247,9 @@ class DeviceControlPort(BaseDevicePort):
         current_friendly_name = self._device_friendly_name
         current_safe_friendly_name = self.get_peripheral().get_device_safe_friendly_name(self._device_friendly_name)
 
+        if current_friendly_name == value:
+            return
+
         if value:
             # Remember enabled ports before they are renamed (practically removed and re-added)
             all_enabled_port_ids = [
