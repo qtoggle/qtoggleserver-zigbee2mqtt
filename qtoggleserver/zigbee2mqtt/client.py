@@ -374,7 +374,7 @@ class Zigbee2MQTTClient(Peripheral):
                 if error:
                     raise ErrorResponse(error)
                 return data
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 self.error('timeout waiting for response on subtopic "%s"', subtopic)
                 raise RequestTimeout(f'Timeout waiting for response on subtopic "{subtopic}"')
             finally:
