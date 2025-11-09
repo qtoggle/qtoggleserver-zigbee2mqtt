@@ -254,6 +254,7 @@ class Zigbee2MQTTClient(Peripheral):
             config["ieee_address"] = ieee_address
             self._device_config_by_friendly_name[friendly_name] = config
             self._device_config_cache_by_friendly_name.pop(friendly_name, None)
+            self.debug('config for device "%s" is "%s"', friendly_name, json_utils.dumps(config))
 
             old_config = old_device_config_by_friendly_name.get(friendly_name, {})
             await self._maybe_trigger_port_update(friendly_name, old_config, config)
@@ -415,7 +416,6 @@ class Zigbee2MQTTClient(Peripheral):
             config |= self._device_config_by_friendly_name.get(friendly_name, {})
 
             self._device_config_cache_by_friendly_name[friendly_name] = config
-            self.debug('config for device "%s" is "%s"', friendly_name, json_utils.dumps(config))
 
         return config
 
@@ -566,7 +566,11 @@ class Zigbee2MQTTClient(Peripheral):
                         if port_args.get("storage") == "state":
                             root_property = port_args.get("property_path", [])[0]
                             property_names.add(self._REV_PROPERTY_MAPPING.get(root_property, root_property))
-                await self.query_device_state(friendly_name, list(property_names))
+                # Unfortunately, we can't query state for multiple (or all) devices at once, so we'd have to query
+                # them one by one here. To avoid flooding the bridge with requests, we skip this for now, relying
+                # on the MQTT retain feature and the device reporting its state when it comes online.
+                #
+                # await self.query_device_state(friendly_name, list(property_names))
 
     def _parse_device_definition_rec(self, exposed_item: dict[str, Any], path: list[str]) -> list[dict[str, Any]]:
         if exposed_item.get("type") == "composite":
