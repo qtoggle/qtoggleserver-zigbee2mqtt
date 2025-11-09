@@ -14,6 +14,7 @@ from qtoggleserver.core import ports as core_ports
 from qtoggleserver.core.typing import GenericJSONDict, GenericJSONList
 from qtoggleserver.peripherals import Peripheral
 from qtoggleserver.utils import json as json_utils
+from qtoggleserver.utils.debouncer import Debouncer
 
 from .exceptions import ClientNotConnected, ErrorResponse, RequestTimeout
 
@@ -95,6 +96,13 @@ class Zigbee2MQTTClient(Peripheral):
         self._pending_requests: dict[str, dict[str, Any]] = {}
         self._update_ports_from_device_info_task: asyncio.Task | None = None
         self._update_ports_from_device_info_scheduled: set[str | None] = set()
+
+        self._set_device_config_debouncer: Debouncer = Debouncer(
+            self.do_request,
+            args=("device/options",),
+            args_reducer=lambda a1, a2: (self._deep_merge(a1[0], a2[0]),),
+            delay=1.0,
+        )
 
         super().__init__(**kwargs)
 
@@ -421,7 +429,7 @@ class Zigbee2MQTTClient(Peripheral):
 
     async def set_device_config(self, friendly_name: str, config: Any) -> None:
         self.debug('updating device "%s" config to "%s"', friendly_name, json_utils.dumps(config))
-        await self.do_request("device/options", {"id": friendly_name, "options": config})
+        self._set_device_config_debouncer.call({"id": friendly_name, "options": config})
 
     def _make_transaction_id(self) -> str:
         return f"{self.mqtt_client_id}_{int(time.time() * 1000)}"
@@ -783,6 +791,13 @@ class Zigbee2MQTTClient(Peripheral):
         if control_port.is_enabled():
             await control_port.trigger_update()
             control_port.save_asap()
+
+    @classmethod
+    def _deep_merge(cls, a: dict, b: dict) -> dict:
+        if not isinstance(a, dict) or not isinstance(b, dict):
+            return a if b is None else b
+        keys = set(a.keys()) | set(b.keys())
+        return {key: cls._deep_merge(a.get(key), b.get(key)) for key in keys}
 
 
 from .ports import DeviceControlPort, DevicePort, PermitJoinPort  # noqa: E402
