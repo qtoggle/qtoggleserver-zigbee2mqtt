@@ -64,6 +64,7 @@ class Zigbee2MQTTClient(Peripheral):
         mqtt_base_topic: str = DEFAULT_MQTT_BASE_TOPIC,
         mqtt_reconnect_interval: int = DEFAULT_MQTT_RECONNECT_INTERVAL,
         mqtt_logging: bool = False,
+        bridge_prefix: str = "",
         bridge_logging: bool = False,
         bridge_request_timeout: int = DEFAULT_BRIDGE_REQUEST_TIMEOUT,
         permit_join_timeout: int = DEFAULT_PERMIT_JOIN_TIMEOUT,
@@ -78,6 +79,7 @@ class Zigbee2MQTTClient(Peripheral):
         self.mqtt_base_topic: str = mqtt_base_topic
         self.mqtt_reconnect_interval: int = mqtt_reconnect_interval
         self.mqtt_logging: bool = mqtt_logging
+        self.bridge_prefix: str = bridge_prefix
         self.bridge_logging: bool = bridge_logging
         self.bridge_request_timeout: int = bridge_request_timeout
         self.permit_join_timeout: int = permit_join_timeout
@@ -500,7 +502,7 @@ class Zigbee2MQTTClient(Peripheral):
         await self.do_request("device/remove", {"id": friendly_name, "force": True})
 
     async def make_port_args(self) -> list[dict[str, Any]]:
-        return [{"driver": PermitJoinPort}]
+        return [{"driver": PermitJoinPort, "id_prefix": self.bridge_prefix}]
 
     def update_ports_from_device_info_asap(self, changed_friendly_name: str | None = None) -> None:
         if changed_friendly_name:
@@ -522,7 +524,7 @@ class Zigbee2MQTTClient(Peripheral):
 
                 await asyncio.sleep(1)
         except asyncio.CancelledError:
-            self.debug("updating ports from device info task cancelled", exc_info=True)
+            self.debug("updating ports from device info task cancelled")
 
     async def _update_ports_from_device_info(self, changed_friendly_names: set[str]) -> None:
         self.debug("updating ports from device info")

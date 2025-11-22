@@ -83,6 +83,9 @@ class PermitJoinPort(Zigbee2MQTTPort):
     DISPLAY_NAME = "Permit Join"
     PERSISTED = None
 
+    def __init__(self, id_prefix: str, **kwargs) -> None:
+        super().__init__(id=f"{id_prefix}{self.ID}", **kwargs)
+
     async def read_value(self) -> NullablePortValue:
         return self.get_peripheral().is_permit_join()
 
