@@ -143,7 +143,7 @@ class DevicePort(BaseDevicePort):
         else:
             value = self.get_config_property(self.get_property_path())
 
-        if await self.get_type() == core_ports.TYPE_BOOLEAN:
+        if self.get_type() == core_ports.TYPE_BOOLEAN:
             value = value == self._value_on
         elif self._values:  # map Z2M value to choice
             try:
@@ -155,7 +155,7 @@ class DevicePort(BaseDevicePort):
 
     @core_ports.skip_write_unavailable
     async def write_value(self, value: PortValue) -> None:
-        if await self.get_type() == core_ports.TYPE_BOOLEAN:
+        if self.get_type() == core_ports.TYPE_BOOLEAN:
             if value:
                 value = self._value_on
             else:
