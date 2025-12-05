@@ -342,9 +342,9 @@ class Zigbee2MQTTClient(Peripheral):
             state = payload_str or "offline"
 
         self.debug('device "%s" is now "%s"', friendly_name, state)
+        self._device_online_by_friendly_name[friendly_name] = state == "online"
         for port in self.get_device_ports(friendly_name):
             await port.trigger_update()
-        self._device_online_by_friendly_name[friendly_name] = state == "online"
 
     async def handle_device_get_message(self, friendly_name: str, payload_json: GenericJSONDict) -> None:
         pass
