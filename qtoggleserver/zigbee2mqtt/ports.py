@@ -113,21 +113,21 @@ class DevicePort(BaseDevicePort):
         values: list[str] | None = None,
         **kwargs,
     ) -> None:
-        super().__init__(id=id, device_friendly_name=device_friendly_name, **kwargs)
-
-        # Following properties will dictate the initial value of their corresponding port attributes
-        self._display_name: str = display_name
-        self._type: str = type
-        self._writable: bool = writable
-        self._unit: str | None = unit
-        self._min: float | None = min
-        self._max: float | None = max
-
         self._property_path: list[str] = property_path
         self._storage: str = storage
         self._value_on: Any = value_on
         self._value_off: Any = value_off
         self._values: list[str] | None = values
+
+        super().__init__(id=id, device_friendly_name=device_friendly_name, **kwargs)
+
+        # Following properties will dictate the initial value of their corresponding port attributes
+        self._display_name = display_name
+        self._type = type
+        self._writable = writable
+        self._unit = unit
+        self._min = min
+        self._max = max
 
         if values:
             # This will determine the actual `choices` attribute value
