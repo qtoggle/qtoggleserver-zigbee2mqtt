@@ -211,6 +211,9 @@ class Zigbee2MQTTClient(Peripheral):
                 friendly_name, subtopic = parts[0], None
             await self.handle_device_message(friendly_name, subtopic, payload_str, payload_json)
 
+        # Update core after each received (and processed) message. This ensures each port value change is processed.
+        await main.update()
+
     async def handle_bridge_message(
         self,
         subtopic: str,
@@ -366,9 +369,6 @@ class Zigbee2MQTTClient(Peripheral):
         self._device_state_by_friendly_name[friendly_name] = state
 
         await self._maybe_trigger_port_update(friendly_name, old_state, state)
-
-        # Ensure each port value change is processed asap
-        await main.update()
 
     async def do_request(self, subtopic: str, payload_json: GenericJSONDict) -> tuple[str, GenericJSONDict]:
         if not self._mqtt_client:
