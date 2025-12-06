@@ -10,6 +10,7 @@ from typing import Any
 
 import aiomqtt
 
+from qtoggleserver.core import main
 from qtoggleserver.core import ports as core_ports
 from qtoggleserver.core.typing import GenericJSONDict, GenericJSONList
 from qtoggleserver.peripherals import Peripheral
@@ -365,6 +366,9 @@ class Zigbee2MQTTClient(Peripheral):
         self._device_state_by_friendly_name[friendly_name] = state
 
         await self._maybe_trigger_port_update(friendly_name, old_state, state)
+
+        # Ensure each port value change is processed asap
+        await main.update()
 
     async def do_request(self, subtopic: str, payload_json: GenericJSONDict) -> tuple[str, GenericJSONDict]:
         if not self._mqtt_client:
