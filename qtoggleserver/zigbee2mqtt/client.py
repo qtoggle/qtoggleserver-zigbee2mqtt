@@ -260,7 +260,7 @@ class Zigbee2MQTTClient(Peripheral):
     async def handle_bridge_info_message(self, payload_json: GenericJSONDict) -> None:
         self._bridge_info = payload_json
 
-        old_device_config_by_friendly_name = dict(self._device_config_by_friendly_name)
+        old_device_config_by_friendly_name = self._device_config_by_friendly_name.copy()
 
         self._device_config_by_friendly_name.clear()
         devices_config = payload_json.get("config", {}).get("devices")
@@ -365,7 +365,7 @@ class Zigbee2MQTTClient(Peripheral):
             processed_payload_json[n] = v
 
         state = self._device_state_by_friendly_name.get(friendly_name, {})
-        old_state = dict(state)
+        old_state = state.copy()
         state.update(processed_payload_json)
         self._device_state_by_friendly_name[friendly_name] = state
 
@@ -377,7 +377,7 @@ class Zigbee2MQTTClient(Peripheral):
 
         topic = f"{self.mqtt_base_topic}/bridge/request/{subtopic}"
         transaction_id = self._make_transaction_id()
-        payload_json = dict(payload_json)
+        payload_json = payload_json.copy()
         payload_json["transaction"] = transaction_id
         await self.publish_mqtt_message(topic, payload_json)
 
