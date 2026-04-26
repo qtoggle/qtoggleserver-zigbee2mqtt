@@ -213,7 +213,13 @@ class Zigbee2MQTTClient(Peripheral):
             await self.handle_device_message(friendly_name, subtopic, payload_str, payload_json)
 
         # Update core after each received (and processed) message. This ensures each port value change is processed.
-        await main.update()
+        # TODO: The only reason this call exists here is to ensure successive MQTT events referring to the same port
+        #  (e.g. turning on and off a switch) get both processed by the system.
+        #  This call should be replaced with a more specialized, optimized call to a function that specifically signals
+        #  the change of the (read) value of a single port.
+        #  Additionaly, other similar add-ons should be updated accordingly.
+
+        await main.read_ports()
 
     async def handle_bridge_message(
         self,
