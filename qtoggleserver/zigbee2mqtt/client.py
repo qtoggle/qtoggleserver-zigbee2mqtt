@@ -212,15 +212,6 @@ class Zigbee2MQTTClient(Peripheral):
                 friendly_name, subtopic = parts[0], None
             await self.handle_device_message(friendly_name, subtopic, payload_str, payload_json)
 
-        # Update core after each received (and processed) message. This ensures each port value change is processed.
-        # TODO: The only reason this call exists here is to ensure successive MQTT events referring to the same port
-        #  (e.g. turning on and off a switch) get both processed by the system.
-        #  This call should be replaced with a more specialized, optimized call to a function that specifically signals
-        #  the change of the (read) value of a single port.
-        #  Additionaly, other similar add-ons should be updated accordingly.
-
-        await main.read_ports()
-
     async def handle_bridge_message(
         self,
         subtopic: str,
@@ -343,6 +334,11 @@ class Zigbee2MQTTClient(Peripheral):
             await self.handle_device_state_message(friendly_name, payload_json)
         else:
             self.warning('got MQTT device message from "%s" on unexpected subtopic "%s"', friendly_name, subtopic)
+
+        # Immediately read port values for all ports associated to given friendly name. This ensures we don't miss out
+        # any value change when we receive multiple simultaneous MQTT messages.
+        ports = self.get_device_ports(friendly_name)
+        await main.read_ports(ports)
 
     async def handle_device_availability_message(
         self, friendly_name: str, payload_str: str | None, payload_json: GenericJSONDict | None
