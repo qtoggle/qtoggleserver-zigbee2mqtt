@@ -236,6 +236,10 @@ class Zigbee2MQTTClient(Peripheral):
             await self.handle_bridge_event_message(payload_json)
         elif subtopic == "extensions":
             await self.handle_bridge_extensions_message(payload_json)
+        elif subtopic == "converters":
+            await self.handle_bridge_converters_message(payload_json)
+        elif subtopic == "health":
+            await self.handle_bridge_health_message(payload_json)
         elif subtopic.startswith("definitions"):
             pass  # Ignore clusters definitions
         elif subtopic.startswith("request/"):
@@ -298,6 +302,12 @@ class Zigbee2MQTTClient(Peripheral):
         pass
 
     async def handle_bridge_extensions_message(self, payload_json: GenericJSONList) -> None:
+        pass
+
+    async def handle_bridge_converters_message(self, payload_json: GenericJSONList) -> None:
+        pass
+
+    async def handle_bridge_health_message(self, payload_json: GenericJSONList) -> None:
         pass
 
     async def handle_bridge_response_message(self, subtopic: str, payload_json: GenericJSONDict) -> None:
