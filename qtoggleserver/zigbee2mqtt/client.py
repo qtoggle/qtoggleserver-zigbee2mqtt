@@ -345,8 +345,7 @@ class Zigbee2MQTTClient(Peripheral):
 
         # Immediately read port values for all ports associated to given friendly name. This ensures we don't miss out
         # any value change when we receive multiple simultaneous MQTT messages.
-        ports = self.get_device_ports(friendly_name)
-        await main.read_ports(ports)
+        await main.read_ports(self.get_ports_by_friendly_name(friendly_name))
 
     async def handle_device_availability_message(
         self, friendly_name: str, payload_str: str | None, payload_json: GenericJSONDict | None
@@ -356,10 +355,12 @@ class Zigbee2MQTTClient(Peripheral):
         else:
             state = payload_str or "offline"
 
-        self.debug('device "%s" is now "%s"', friendly_name, state)
+        self.debug('device "%s" is now %s', friendly_name, state)
         self._device_online_by_friendly_name[friendly_name] = state == "online"
-        for port in self.get_device_ports(friendly_name):
-            await port.trigger_update()
+        for port in self.get_ports_by_friendly_name(friendly_name):
+            port.invalidate_attrs()
+            if port.is_enabled():
+                await port.trigger_update()
 
     async def handle_device_get_message(self, friendly_name: str, payload_json: GenericJSONDict) -> None:
         pass
@@ -777,6 +778,13 @@ class Zigbee2MQTTClient(Peripheral):
         safe_friendly_name = self.get_device_safe_friendly_name(friendly_name)
         return self.get_port(safe_friendly_name)
 
+    def get_ports_by_friendly_name(self, friendly_name: str) -> list[BaseDevicePort]:
+        ports: list[BaseDevicePort] = self.get_device_ports(friendly_name)
+        control_port = self.get_control_port(friendly_name)
+        if control_port:
+            ports.append(control_port)
+        return ports
+
     async def _maybe_trigger_port_update(self, friendly_name: str, old_properties: dict, new_properties: dict) -> None:
         control_port = self.get_control_port(friendly_name)
         if not control_port:
@@ -817,4 +825,4 @@ class Zigbee2MQTTClient(Peripheral):
         return {key: cls._deep_merge(a.get(key), b.get(key)) for key in keys}
 
 
-from .ports import DeviceControlPort, DevicePort, PermitJoinPort  # noqa: E402
+from .ports import BaseDevicePort, DeviceControlPort, DevicePort, PermitJoinPort  # noqa: E402
