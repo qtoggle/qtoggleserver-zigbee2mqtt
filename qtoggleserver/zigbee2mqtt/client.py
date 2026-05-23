@@ -125,6 +125,7 @@ class Zigbee2MQTTClient(Peripheral):
                     logger=self.mqtt_logger,
                     max_queued_incoming_messages=self._MAX_INCOMING_QUEUE_SIZE,
                     max_queued_outgoing_messages=self._MAX_OUTGOING_QUEUE_SIZE,
+                    timeout=self.mqtt_reconnect_interval,
                 ) as client:
                     self._mqtt_client = client
                     await client.subscribe(f"{self.mqtt_base_topic}/#")
@@ -153,13 +154,19 @@ class Zigbee2MQTTClient(Peripheral):
     async def _stop_client_task(self) -> None:
         if self._client_task:
             self._client_task.cancel()
-            await self._client_task
+            try:
+                await self._client_task
+            except asyncio.CancelledError:
+                pass
             self._client_task = None
 
     async def _stop_update_ports_from_device_info_task(self) -> None:
         if self._update_ports_from_device_info_task:
             self._update_ports_from_device_info_task.cancel()
-            await self._update_ports_from_device_info_task
+            try:
+                await self._update_ports_from_device_info_task
+            except asyncio.CancelledError:
+                pass
             self._update_ports_from_device_info_task = None
 
     async def handle_enable(self) -> None:
