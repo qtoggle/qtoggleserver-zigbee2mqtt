@@ -667,6 +667,7 @@ class Zigbee2MQTTClient(Peripheral):
         device_config = self.get_device_config(friendly_name)
         force_attribute_properties = device_config.get("force_attribute_properties", set())
         force_port_properties = device_config.get("force_port_properties", set())
+        rename_properties = device_config.get("rename_properties", {})
 
         exposed_items = self._parse_device_definition(definition)
 
@@ -694,6 +695,11 @@ class Zigbee2MQTTClient(Peripheral):
                 is_attrdef = False
             elif not is_attrdef and any(fnmatch(path_str, pat) for pat in force_attribute_properties):
                 is_attrdef = True
+
+            for rename_pattern, rename_repl in rename_properties.items():
+                if re.fullmatch(rename_pattern, path_str):
+                    exposed_item["property"] = re.sub(rename_pattern, rename_repl, path_str)
+                    break
 
             if is_attrdef:
                 type_ = self._ATTR_TYPE_MAPPING.get(exposed_item.get("type"))

@@ -151,3 +151,13 @@ names are dot separated when they are part of a composite type (e.g. `color.hue`
 
  * type: `[string]`
  * default: `[]`
+
+### `rename_properties`
+
+Allows renaming the property names of exposed capabilities, regardless of whether they become standalone qToggle ports
+or attributes of the corresponding control port. Each entry in the dictionary is a regex pattern that is matched
+against the full dot-separated property path (e.g. `color.hue`), associated to a replacement string. The first
+matching pattern wins. Group references (e.g. `\1`) are supported in the replacement string.
+
+ * type: `{string: string}`
+ * default: `{}`
