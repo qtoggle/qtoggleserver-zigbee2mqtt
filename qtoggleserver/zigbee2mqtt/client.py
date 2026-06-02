@@ -116,6 +116,7 @@ class Zigbee2MQTTClient(Peripheral):
     async def _client_loop(self) -> None:
         while True:
             try:
+                self.set_online(False)
                 async with aiomqtt.Client(
                     hostname=self.mqtt_server,
                     port=self.mqtt_port,
@@ -129,6 +130,7 @@ class Zigbee2MQTTClient(Peripheral):
                 ) as client:
                     self._mqtt_client = client
                     await client.subscribe(f"{self.mqtt_base_topic}/#")
+                    self.set_online(True)
                     async for message in client.messages:
                         try:
                             await self.handle_mqtt_message(str(message.topic), message.payload)
