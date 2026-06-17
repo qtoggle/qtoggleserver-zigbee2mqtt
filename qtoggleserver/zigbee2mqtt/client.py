@@ -13,6 +13,7 @@ from qtoggleserver.core import ports as core_ports
 from qtoggleserver.core.typing import GenericJSONDict, GenericJSONList
 from qtoggleserver.peripherals import Peripheral
 from qtoggleserver.utils import json as json_utils
+from qtoggleserver.utils.misc import deep_update
 
 from .exceptions import ClientNotConnected, ErrorResponse, RequestTimeout
 
@@ -412,10 +413,16 @@ class Zigbee2MQTTClient(Peripheral):
         return self._device_state_by_friendly_name.get(friendly_name, {})
 
     async def set_device_state(self, friendly_name: str, value: Any) -> None:
-        self.debug('updating device "%s" state to "%s"', friendly_name, json_utils.dumps(value))
+        self.debug('updating device "%s" state "%s"', friendly_name, json_utils.dumps(value))
+        state = self.get_device_state(friendly_name).copy()
+        deep_update(state, value)
+
         topic = f"{self.mqtt_base_topic}/{friendly_name}/set"
         value = {self._REV_PROPERTY_MAPPING.get(k, k): v for k, v in value.items()}
         await self.publish_mqtt_message(topic, value)
+
+        # Update locally stored device state
+        self._device_state_by_friendly_name[friendly_name] = state
 
     async def query_device_state(self, friendly_name: str, properties: list[str] | None = None) -> None:
         config = self.get_device_config(friendly_name)
@@ -445,9 +452,18 @@ class Zigbee2MQTTClient(Peripheral):
 
         return config
 
-    async def set_device_config(self, friendly_name: str, config: Any) -> None:
+    async def set_device_config(self, friendly_name: str, config: GenericJSONDict) -> None:
         self.debug('updating device "%s" config to "%s"', friendly_name, json_utils.dumps(config))
+        all_config = self._device_config_by_friendly_name.get(friendly_name, {}).copy()
+        deep_update(all_config, config)
+
         await self.do_request("device/options", {"id": friendly_name, "options": config})
+
+        # Invalidate config cache
+        self._device_config_cache_by_friendly_name.pop(friendly_name, None)
+
+        # Update locally stored device config
+        self._device_config_by_friendly_name[friendly_name] = all_config
 
     def _make_transaction_id(self) -> str:
         return f"{self.mqtt_client_id}_{int(time.time() * 1000)}"
