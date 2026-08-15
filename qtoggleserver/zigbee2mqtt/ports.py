@@ -81,7 +81,6 @@ class PermitJoinPort(Zigbee2MQTTPort):
     TYPE = core_ports.TYPE_BOOLEAN
     WRITABLE = True
     DISPLAY_NAME = "Permit Join"
-    PERSISTED = None
 
     def __init__(self, id_prefix: str, **kwargs) -> None:
         super().__init__(id=f"{id_prefix}{self.ID}", **kwargs)
@@ -200,7 +199,6 @@ class DeviceControlPort(BaseDevicePort):
 
     TYPE = core_ports.TYPE_BOOLEAN
     WRITABLE = True
-    PERSISTED = None
 
     _MAX_RENAME_ATTEMPTS = 10
 
