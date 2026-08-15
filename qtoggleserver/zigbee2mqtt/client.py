@@ -499,10 +499,7 @@ class Zigbee2MQTTClient(Peripheral):
         control_port = self.get_port(safe_friendly_name)
         if not control_port:
             return False
-        if not control_port.is_enabled():
-            return False
-
-        return True
+        return control_port.is_enabled()
 
     def is_device_enabled(self, friendly_name: str) -> bool:
         # First ensure our device control port is enabled
@@ -840,4 +837,4 @@ class Zigbee2MQTTClient(Peripheral):
             control_port.save_asap()
 
 
-from .ports import BaseDevicePort, DeviceControlPort, DevicePort, PermitJoinPort  # noqa: E402
+from .ports import BaseDevicePort, DeviceControlPort, DevicePort, PermitJoinPort
