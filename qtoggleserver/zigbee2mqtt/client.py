@@ -88,11 +88,13 @@ class Zigbee2MQTTClient(Peripheral):
         self._client_task: asyncio.Task | None = None
         self._device_info_by_friendly_name: dict[str, GenericJSONDict] = {}
         self._device_state_by_friendly_name: dict[str, GenericJSONDict] = {}
+        self._device_state_time_by_friendly_name: dict[str, dict[str, int]] = {}
         self._device_online_by_friendly_name: dict[str, bool] = {}
         self._device_config_by_friendly_name: dict[str, GenericJSONDict] = {}
         self._device_config_cache_by_friendly_name: dict[str, GenericJSONDict] = {}
         self._safe_friendly_name_dict: dict[str, str] = {}
         self._bridge_info: GenericJSONDict | None = None
+        self._bridge_info_time: int | None = None
         self._pending_requests: dict[str, dict[str, Any]] = {}
         self._update_ports_from_device_info_task: asyncio.Task | None = None
         self._update_ports_from_device_info_scheduled: set[str | None] = set()
@@ -258,6 +260,7 @@ class Zigbee2MQTTClient(Peripheral):
 
     async def handle_bridge_info_message(self, payload_json: GenericJSONDict) -> None:
         self._bridge_info = payload_json
+        self._bridge_info_time = int(time.time() * 1000)
 
         old_device_config_by_friendly_name = self._device_config_by_friendly_name.copy()
 
@@ -380,6 +383,11 @@ class Zigbee2MQTTClient(Peripheral):
         state.update(processed_payload_json)
         self._device_state_by_friendly_name[friendly_name] = state
 
+        now_ms = int(time.time() * 1000)
+        state_time = self._device_state_time_by_friendly_name.setdefault(friendly_name, {})
+        for n in processed_payload_json:
+            state_time[n] = now_ms
+
         await self._maybe_trigger_port_update(friendly_name, old_state, state)
 
     async def do_request(self, subtopic: str, payload_json: GenericJSONDict) -> tuple[str, GenericJSONDict]:
@@ -410,6 +418,11 @@ class Zigbee2MQTTClient(Peripheral):
 
     def get_device_state(self, friendly_name: str) -> GenericJSONDict:
         return self._device_state_by_friendly_name.get(friendly_name, {})
+
+    def get_device_state_time(self, friendly_name: str, property_name: str) -> int | None:
+        """Return when a state message last reported `property_name` for the device, in milliseconds."""
+
+        return self._device_state_time_by_friendly_name.get(friendly_name, {}).get(property_name)
 
     async def set_device_state(self, friendly_name: str, value: Any) -> None:
         self.debug('requesting device "%s" state update to "%s"', friendly_name, json_utils.dumps(value))
@@ -460,6 +473,11 @@ class Zigbee2MQTTClient(Peripheral):
     def get_bridge_info(self) -> GenericJSONDict | None:
         return self._bridge_info
 
+    def get_bridge_info_time(self) -> int | None:
+        """Return when the bridge info, which also holds the device configs, was last received, in milliseconds."""
+
+        return self._bridge_info_time
+
     async def set_permit_join(self, value: bool, friendly_name: str | None = None) -> None:
         await self.do_request(
             "permit_join", {"time": self.permit_join_timeout if value else 0, "device": friendly_name}
@@ -507,6 +525,7 @@ class Zigbee2MQTTClient(Peripheral):
             self._device_config_cache_by_friendly_name,
             self._device_info_by_friendly_name,
             self._device_state_by_friendly_name,
+            self._device_state_time_by_friendly_name,
         ]
         for device_dict in device_dicts:
             if old_friendly_name in device_dict:
