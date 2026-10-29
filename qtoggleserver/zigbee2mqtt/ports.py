@@ -91,6 +91,9 @@ class PermitJoinPort(Zigbee2MQTTPort):
     async def write_value(self, value: PortValue) -> None:
         await self.get_peripheral().set_permit_join(value)
 
+    def get_read_value_time(self) -> int | None:
+        return self.get_peripheral().get_bridge_info_time()
+
 
 class DevicePort(BaseDevicePort):
     def __init__(
@@ -167,6 +170,13 @@ class DevicePort(BaseDevicePort):
             await self.set_state_property(self.get_property_path(), value)
         else:
             await self.set_config_property(self.get_property_path(), value)
+
+    def get_read_value_time(self) -> int | None:
+        # Values come from the latest message that reported them, which may predate a write that has completed since
+        if self._storage == "state":
+            return self.get_peripheral().get_device_state_time(self.get_device_friendly_name(), self._property_path[0])
+        else:
+            return self.get_peripheral().get_bridge_info_time()
 
     def get_property_path(self) -> list[str]:
         return self._property_path
@@ -354,6 +364,9 @@ class DeviceControlPort(BaseDevicePort):
 
     async def write_value(self, value: PortValue) -> None:
         await self.get_peripheral().set_device_enabled(self.get_device_friendly_name(), value)
+
+    def get_read_value_time(self) -> int | None:
+        return self.get_peripheral().get_bridge_info_time()
 
     async def attr_get_display_name(self) -> str:
         config_description = self.get_config_property(["description"])
